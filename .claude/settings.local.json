@@ -39,7 +39,9 @@
       "Bash(curl -sk --max-time 15 -o /dev/null -w \"GET / -> HTTP %{http_code}\\\\n\" https://localhost:51985/)",
       "Bash(curl -sk --max-time 20 -X POST https://localhost:51985/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"superadmin@securegate.local\",\"password\":\"ChangeMe123!\",\"rememberMe\":true}')",
       "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\).on\\('end',\\(\\)=>{try{const j=JSON.parse\\(d\\);console.log\\('success:',j.success,'| user:',j.data?.user?.fullName,'| token:',\\(j.data?.accessToken||''\\).slice\\(0,20\\)+'...'\\);}catch\\(e\\){console.log\\('raw:',d.slice\\(0,200\\)\\)}}\\)\")",
-      "Bash(echo \"EXIT: $?\")"
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(cat *.slnx)",
+      "Bash(ls README*)"
     ]
   }
 }
