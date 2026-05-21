@@ -176,8 +176,3 @@ securegate.client/src/
 └── theme.js            # yorug'/qorong'i mavzu
 ```
 
----
-
-## 📜 Litsenziya
-
-Ichki/xususiy loyiha. Litsenziya shartlari egasi tomonidan belgilanadi.
