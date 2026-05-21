@@ -1,0 +1,10 @@
+<Solution>
+  <Project Path="securegate.client/securegate.client.esproj">
+    <Build />
+    <Deploy />
+  </Project>
+  <Project Path="SecureGate.Data/SecureGate.Data.csproj" Id="9acadb28-9187-4891-8d2e-3d91e257e120" />
+  <Project Path="SecureGate.Domain/SecureGate.Domain.csproj" Id="e56d1e7c-f579-494d-b946-55c82db73504" />
+  <Project Path="SecureGate.Infrastructure/SecureGate.Infrastructure.csproj" Id="3ad0c573-76ed-43c4-891b-31d06d7932f7" />
+  <Project Path="SecureGate.Server/SecureGate.Server.csproj" />
+</Solution>
