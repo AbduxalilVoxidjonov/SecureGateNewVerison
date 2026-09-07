@@ -1,8 +1,16 @@
-// Dashboard / Bosh sahifa — real API
+// Dashboard / Bosh sahifa — real API + SignalR (dashboard hubi)
+import { useState } from "react";
 import { Icon } from "../components/Icon";
+import { HubPill } from "../components/ui";
 import { Loading, ErrorBox } from "../components/state";
 import { useApi } from "../hooks/useApi";
+import { useHubEvent } from "../hooks/useHub";
 import { dashboardApi } from "../api/endpoints";
+import { fmtTime, stableKeys } from "./utils";
+import { prependCapped, useReloadOnReconnect } from "./live";
+
+// Faoliyat ro'yxati cheksiz o'smasligi kerak (uzoq ochiq turgan monitor).
+const MAX_ACTIVITY = 50;
 
 const feedIconFor = (type) => {
   switch (type) {
@@ -15,7 +23,55 @@ const feedIconFor = (type) => {
 };
 
 const DashboardScreen = ({ goTo }) => {
-  const { data, loading, error, reload } = useApi(() => dashboardApi.get(), []);
+  // Statistika `StatsUpdated` kelmasa ham eskirmaganini bilish uchun —
+  // oxirgi yangilanish vaqti. Ham REST javobida, ham har bir hodisada yangilanadi.
+  const [updatedAt, setUpdatedAt] = useState(null);
+  const touch = () => setUpdatedAt(new Date());
+
+  const { data, loading, error, reload, setData } = useApi(
+    (signal) => dashboardApi.get(signal).then((r) => { touch(); return r; }),
+    []
+  );
+
+  // Faqat `dashboard` hubi. MUHIM: bitta o'tish uchun backend `camera/NewAccessLog`
+  // ni ham, `dashboard/NewActivity` ni ham yuboradi — ikkalasiga obuna bo'lsak
+  // faoliyat ro'yxatiga ikki qator tushardi. Shuning uchun bu ekranda faqat
+  // `NewActivity` ishlatiladi (NewAccessLog reports/blocked ekranlarida qoladi).
+  //
+  // Uzilish paytida o'tkazib yuborilgan hodisalarni qoplash uchun —
+  // qayta ulanganda bir marta to'liq qayta o'qish. Bu ayniqsa muhim, chunki
+  // `StatsUpdated` leading-edge throttle bilan yuboriladi (5 s) va oynadagi
+  // oxirgi qiymat umuman yetib kelmasligi mumkin.
+  const hubStatus = useReloadOnReconnect("dashboard", reload);
+
+  // Faoliyat oqimi. `type` allaqachon "good" | "deny" | "warn" | "info" —
+  // `feedIconFor` aynan shuni kutadi. Id yo'q, shuning uchun dedupe qilinmaydi.
+  useHubEvent("dashboard", "NewActivity", (p) => {
+    if (!data || !p) return;
+    setData((d) => (d ? {
+      ...d,
+      recentActivity: prependCapped(
+        d.recentActivity || [],
+        { userName: p.userName, action: p.action, type: p.type, time: p.time },
+        () => null,
+        MAX_ACTIVITY,
+      ),
+    } : d));
+    touch();
+  });
+
+  // Statistika kartalari — server hisoblab yuboradi.
+  useHubEvent("dashboard", "StatsUpdated", (p) => {
+    if (!data || !p) return;
+    setData((d) => (d ? {
+      ...d,
+      activeStudentCount: p.activeStudents ?? d.activeStudentCount,
+      todayPassCount: p.todayPass ?? d.todayPassCount,
+      activeCameraCount: p.activeCameras ?? d.activeCameraCount,
+      alertCount: p.alerts ?? d.alertCount,
+    } : d));
+    touch();
+  });
 
   if (loading) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
@@ -26,6 +82,9 @@ const DashboardScreen = ({ goTo }) => {
   const turnstiles = d.popularTurnstiles || [];
   const alerts = d.recentAlerts || [];
   const maxHourly = Math.max(1, ...hourly);
+  // Backend ViewModel'larida Id yo'q — kompozit barqaror kalit ishlatamiz.
+  const activityRows = stableKeys(activity, (a) => `${a.time}|${a.userName}|${a.action}|${a.type}`);
+  const turnstileRows = stableKeys(turnstiles, (t) => t.name);
 
   return (
     <div className="screen-in">
@@ -35,7 +94,13 @@ const DashboardScreen = ({ goTo }) => {
           <div className="page-sub">Real-time monitoring · Bugun, {new Date().toLocaleDateString("uz-UZ", { day: "numeric", month: "long", year: "numeric" })}</div>
         </div>
         <div className="row">
-          <span className="live-pill"><span className="pulse"></span>Live</span>
+          {/* Haqiqiy SignalR holati (bezak emas): yashil — jonli, sariq — ulanmoqda,
+              kulrang — aloqa yo'q. Yonida oxirgi yangilanish vaqti: `StatsUpdated`
+              kelmasa ham raqamlar qachondan beri turganini ko'rsatadi. */}
+          <HubPill status={hubStatus} title="dashboard hub" />
+          <span className="mono faint" style={{ fontSize: 11.5 }}>
+            {updatedAt ? `yangilandi ${fmtTime(updatedAt)}` : "—"}
+          </span>
           <button className="btn" onClick={reload}><Icon name="refresh" size={14} /> Yangilash</button>
         </div>
       </div>
@@ -74,11 +139,11 @@ const DashboardScreen = ({ goTo }) => {
             </div>
             <div style={{ maxHeight: 420, overflow: "auto" }}>
               {activity.length === 0 && <div className="faint" style={{ padding: 20, textAlign: "center" }}>Faoliyat yo'q</div>}
-              {activity.map((a, i) => {
+              {activityRows.map(({ item: a, key }) => {
                 const ic = feedIconFor(a.type);
                 return (
-                  <div key={i} className="feed-item">
-                    <div className="t">{a.time}</div>
+                  <div key={key} className="feed-item">
+                    <div className="t">{fmtTime(a.time)}</div>
                     <div className={`feed-icon ${ic.cls}`}><Icon name={ic.name} size={13} /></div>
                     <div>
                       <div className="feed-who">{a.userName}</div>
@@ -100,7 +165,7 @@ const DashboardScreen = ({ goTo }) => {
             </div>
             <div className="bar-chart">
               {hourly.map((v, i) => (
-                <div key={i} className={`bar ${i > new Date().getHours() ? "muted" : ""}`}
+                <div key={`hour-${i}`} className={`bar ${i > new Date().getHours() ? "muted" : ""}`}
                   style={{ height: `${Math.max(4, (v / maxHourly) * 100)}%` }} title={`${i}:00 · ${v}`} />
               ))}
             </div>
@@ -119,8 +184,8 @@ const DashboardScreen = ({ goTo }) => {
             </div>
             <div className="col" style={{ gap: 12 }}>
               {turnstiles.length === 0 && <div className="faint" style={{ fontSize: 12 }}>Ma'lumot yo'q</div>}
-              {turnstiles.map((t, i) => (
-                <div key={i}>
+              {turnstileRows.map(({ item: t, key }) => (
+                <div key={key}>
                   <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
                     <span style={{ fontSize: 13 }}>{t.name}</span>
                     <span className="mono tnum" style={{ fontSize: 12, color: "var(--text-2)" }}>{t.count}</span>

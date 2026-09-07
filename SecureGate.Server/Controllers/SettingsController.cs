@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using SecureGate.Api.Filters;
+using SecureGate.Api.Models;
 using SecureGate.Domain.Auth;
 using SecureGate.Infrastructure.Services.Interfaces;
 using SecureGate.Infrastructure.ViewModels.Settings;
@@ -92,19 +93,24 @@ namespace SecureGate.Api.Controllers
             };
             var values = await _settingService.GetManyAsync(keys);
 
-            var model = new IntegrationsSettingsViewModel
+            // Maxfiy qiymatlar (SMTP paroli, Telegram tokeni, SMS kaliti) hech qachon
+            // ochiq qaytmaydi — faqat maska va "bormi" bayrog'i.
+            var model = new IntegrationsSettingsResponseDto
             {
                 SmtpHost = values[Keys.SmtpHost],
                 SmtpPort = int.TryParse(values[Keys.SmtpPort], out var port) ? port : 587,
                 SmtpUsername = values[Keys.SmtpUsername],
-                SmtpPassword = values[Keys.SmtpPassword],
+                SmtpPassword = SecretMask.Mask(values[Keys.SmtpPassword]),
+                HasSmtpPassword = !string.IsNullOrEmpty(values[Keys.SmtpPassword]),
                 SmtpUseSsl = Bool(values, Keys.SmtpUseSsl, true),
                 SmtpFromEmail = values[Keys.SmtpFromEmail],
-                TelegramBotToken = values[Keys.TelegramBotToken],
+                TelegramBotToken = SecretMask.Mask(values[Keys.TelegramBotToken]),
+                HasTelegramBotToken = !string.IsNullOrEmpty(values[Keys.TelegramBotToken]),
                 TelegramChatId = values[Keys.TelegramChatId],
                 SmsProvider = values[Keys.SmsProvider] ?? "Eskiz.uz",
                 SmsApiUrl = values[Keys.SmsApiUrl],
-                SmsApiKey = values[Keys.SmsApiKey],
+                SmsApiKey = SecretMask.Mask(values[Keys.SmsApiKey]),
+                HasSmsApiKey = !string.IsNullOrEmpty(values[Keys.SmsApiKey]),
                 SmsSender = values[Keys.SmsSender]
             };
             return OkResponse(model);
@@ -116,21 +122,28 @@ namespace SecureGate.Api.Controllers
         {
             if (!ModelState.IsValid) return ValidationFail();
 
-            await _settingService.SetManyAsync(new Dictionary<string, string?>
+            var toSave = new Dictionary<string, string?>
             {
                 [Keys.SmtpHost] = model.SmtpHost,
                 [Keys.SmtpPort] = model.SmtpPort?.ToString(),
                 [Keys.SmtpUsername] = model.SmtpUsername,
-                [Keys.SmtpPassword] = model.SmtpPassword,
                 [Keys.SmtpUseSsl] = B(model.SmtpUseSsl),
                 [Keys.SmtpFromEmail] = model.SmtpFromEmail,
-                [Keys.TelegramBotToken] = model.TelegramBotToken,
                 [Keys.TelegramChatId] = model.TelegramChatId,
                 [Keys.SmsProvider] = model.SmsProvider,
                 [Keys.SmsApiUrl] = model.SmsApiUrl,
-                [Keys.SmsApiKey] = model.SmsApiKey,
                 [Keys.SmsSender] = model.SmsSender
-            });
+            };
+
+            // Maxfiy maydonlar: kelgan qiymat bo'sh yoki maskalangan bo'lsa — eskisi saqlanib qoladi.
+            if (!SecretMask.IsMaskedOrEmpty(model.SmtpPassword))
+                toSave[Keys.SmtpPassword] = model.SmtpPassword;
+            if (!SecretMask.IsMaskedOrEmpty(model.TelegramBotToken))
+                toSave[Keys.TelegramBotToken] = model.TelegramBotToken;
+            if (!SecretMask.IsMaskedOrEmpty(model.SmsApiKey))
+                toSave[Keys.SmsApiKey] = model.SmsApiKey;
+
+            await _settingService.SetManyAsync(toSave);
 
             return OkResponse("Saqlandi.");
         }
@@ -149,25 +162,17 @@ namespace SecureGate.Api.Controllers
             };
             var values = await _settingService.GetManyAsync(keys);
 
+            // GET faqat O'QIYDI. Kalit yaratish faqat POST /api/settings/api/regenerate-key orqali.
             var apiKey = values[Keys.ApiKey];
-            if (string.IsNullOrEmpty(apiKey))
-            {
-                apiKey = GenerateApiKey();
-                await _settingService.SetManyAsync(new Dictionary<string, string?>
-                {
-                    [Keys.ApiKey] = apiKey,
-                    [Keys.ApiKeyCreatedAt] = DateTime.UtcNow.ToString("O")
-                });
-                values[Keys.ApiKey] = apiKey;
-                values[Keys.ApiKeyCreatedAt] = DateTime.UtcNow.ToString("O");
-            }
 
-            var model = new ApiSettingsViewModel
+            var model = new ApiSettingsResponseDto
             {
-                ApiKey = apiKey,
+                ApiKey = SecretMask.Mask(apiKey),
+                HasApiKey = !string.IsNullOrEmpty(apiKey),
                 ApiKeyCreatedAt = values[Keys.ApiKeyCreatedAt],
                 WebhookUrl = values[Keys.WebhookUrl],
-                WebhookSecret = values[Keys.WebhookSecret],
+                WebhookSecret = SecretMask.Mask(values[Keys.WebhookSecret]),
+                HasWebhookSecret = !string.IsNullOrEmpty(values[Keys.WebhookSecret]),
                 WebhookEnabled = Bool(values, Keys.WebhookEnabled),
                 SubscribeAccessGranted = Bool(values, Keys.SubAccessGranted, true),
                 SubscribeAccessDenied = Bool(values, Keys.SubAccessDenied, true),
@@ -184,17 +189,21 @@ namespace SecureGate.Api.Controllers
         {
             if (!ModelState.IsValid) return ValidationFail();
 
-            await _settingService.SetManyAsync(new Dictionary<string, string?>
+            var toSave = new Dictionary<string, string?>
             {
                 [Keys.WebhookUrl] = model.WebhookUrl,
-                [Keys.WebhookSecret] = model.WebhookSecret,
                 [Keys.WebhookEnabled] = B(model.WebhookEnabled),
                 [Keys.SubAccessGranted] = B(model.SubscribeAccessGranted),
                 [Keys.SubAccessDenied] = B(model.SubscribeAccessDenied),
                 [Keys.SubCameraOffline] = B(model.SubscribeCameraOffline),
                 [Keys.SubTurnstileError] = B(model.SubscribeTurnstileError),
                 [Keys.SubUserBlocked] = B(model.SubscribeUserBlocked)
-            });
+            };
+
+            if (!SecretMask.IsMaskedOrEmpty(model.WebhookSecret))
+                toSave[Keys.WebhookSecret] = model.WebhookSecret;
+
+            await _settingService.SetManyAsync(toSave);
 
             return OkResponse("Saqlandi.");
         }
@@ -219,18 +228,28 @@ namespace SecureGate.Api.Controllers
         public async Task<IActionResult> GetAll()
         {
             var list = await _settingService.GetAllAsync();
-            return OkResponse(list);
+
+            // Maxfiy kalitlar (*.password, *.secret, *.key, *.token) maskalanadi.
+            var safe = list.Select(s => new SettingResponseDto
+            {
+                Id = s.Id,
+                Key = s.Key,
+                Value = SecretMask.IsSecretKey(s.Key) ? SecretMask.Mask(s.Value) : s.Value,
+                Description = s.Description,
+                Type = s.Type,
+                IsSecret = SecretMask.IsSecretKey(s.Key),
+                HasValue = !string.IsNullOrEmpty(s.Value)
+            }).ToList();
+
+            return OkResponse(safe);
         }
 
         // ===================== Helpers =====================
 
-        private static string GenerateApiKey()
-        {
-            var bytes = RandomNumberGenerator.GetBytes(32);
-            return "sgk_" + Convert.ToBase64String(bytes)
-                .Replace("+", "").Replace("/", "").Replace("=", "")
-                .Substring(0, 40);
-        }
+        // Eski implementatsiya Base64'dan "+/=" olib tashlagach 40 belgi qolmasligi mumkin edi
+        // (~4% hollarda ArgumentOutOfRangeException -> 500). Hex hech qachon qisqarmaydi.
+        private static string GenerateApiKey() =>
+            "sgk_" + Convert.ToHexString(RandomNumberGenerator.GetBytes(20)).ToLowerInvariant();
 
         private static bool Bool(IDictionary<string, string?> dict, string key, bool fallback = false)
         {

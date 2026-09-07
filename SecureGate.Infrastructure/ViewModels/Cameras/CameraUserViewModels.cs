@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using SecureGate.Domain;
 
 namespace SecureGate.Infrastructure.ViewModels.Cameras
@@ -52,7 +52,7 @@ namespace SecureGate.Infrastructure.ViewModels.Cameras
         public int? CameraId { get; set; }
 
         [Display(Name = "Aniqlangan vaqt")]
-        public DateTime DetectedAt { get; set; } = DateTime.Now;
+        public DateTime DetectedAt { get; set; } = DateTime.UtcNow;
 
         [Display(Name = "Aniqlik (%)")]
         [Range(0, 100)]

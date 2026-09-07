@@ -1,4 +1,7 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using OpenCvSharp;
@@ -13,19 +16,26 @@ namespace SecureGate.Infrastructure.Services.Implementations
     // frame'larni o'qiydi, FaceRecognitionEngine orqali yuzlarni aniqlaydi va
     // KnownFaceCache bilan solishtiradi. Mosini topsa — FaceMatchHandler chaqiradi.
     //
-    // Har bir kamera uchun alohida Task (alohida thread emas — Task continuation).
-    // Kameralar ro'yxati har 30s yangilanadi: yangilari ishga tushadi, o'chirilganlari to'xtaydi.
+    // Har bir kamera uchun ALOHIDA THREAD (Task.Factory.StartNew + LongRunning) —
+    // VideoCapture.Read bloklovchi chaqiruv bo'lgani uchun thread pool'ni band qilmaslik kerak.
+    //
+    // Kameralar ro'yxati har 30s yangilanadi:
+    //   - yangilari ishga tushadi
+    //   - o'chirilganlari to'xtaydi
+    //   - sozlamalari o'zgarganlari qayta ishga tushadi (signature taqqoslash)
+    //   - o'lib qolgan loop'lar (Task.IsCompleted) qayta tiklanadi
     public class CameraStreamWorker : BackgroundService
     {
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IFaceRecognitionEngine _engine;
         private readonly IKnownFaceCache _knownCache;
-        private readonly ICameraCredentialProtector _credProtector;
+        private readonly IStreamUrlBuilder _urlBuilder;
         private readonly IHubContext<CameraHub> _cameraHub;
+        private readonly IWebHostEnvironment _env;
         private readonly IConfiguration _config;
         private readonly ILogger<CameraStreamWorker> _logger;
 
-        // Active per-camera tasks
+        // Active per-camera threads
         private readonly ConcurrentDictionary<int, CameraStreamHandle> _streams = new();
 
         // DB yozish cooldown'i: (cameraId, personKey) → oxirgi yozuv UTC.
@@ -40,21 +50,29 @@ namespace SecureGate.Infrastructure.Services.Implementations
         private readonly int _turnstileCooldownSeconds;
         private readonly int _regularCooldownSeconds;
         private readonly int _cameraRefreshSeconds;
+        private readonly int _snapshotMaxWidth;
+        private readonly int _snapshotQuality;
+        private readonly int _snapshotRetentionDays;
+
+        // Snapshot retention — kuniga bir marta ishlaydi
+        private DateTime _lastRetentionRunUtc = DateTime.MinValue;
 
         public CameraStreamWorker(
             IServiceScopeFactory scopeFactory,
             IFaceRecognitionEngine engine,
             IKnownFaceCache knownCache,
-            ICameraCredentialProtector credProtector,
+            IStreamUrlBuilder urlBuilder,
             IHubContext<CameraHub> cameraHub,
+            IWebHostEnvironment env,
             IConfiguration config,
             ILogger<CameraStreamWorker> logger)
         {
             _scopeFactory = scopeFactory;
             _engine = engine;
             _knownCache = knownCache;
-            _credProtector = credProtector;
+            _urlBuilder = urlBuilder;
             _cameraHub = cameraHub;
+            _env = env;
             _config = config;
             _logger = logger;
 
@@ -72,6 +90,11 @@ namespace SecureGate.Infrastructure.Services.Implementations
             if (legacy.HasValue) _turnstileCooldownSeconds = legacy.Value;
 
             _cameraRefreshSeconds = config.GetValue<int?>("FaceRecognition:CameraRefreshSeconds") ?? 30;
+
+            // Snapshot hajmi va saqlash muddati
+            _snapshotMaxWidth = config.GetValue<int?>("FaceRecognition:SnapshotMaxWidth") ?? SnapshotImage.DefaultMaxWidth;
+            _snapshotQuality = config.GetValue<int?>("FaceRecognition:SnapshotJpegQuality") ?? SnapshotImage.DefaultQuality;
+            _snapshotRetentionDays = config.GetValue<int?>("FaceRecognition:SnapshotRetentionDays") ?? 30;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -86,8 +109,17 @@ namespace SecureGate.Infrastructure.Services.Implementations
             _logger.LogInformation("CameraStreamWorker ishga tushdi (minSim={Sim}, interval={Int}ms)",
                 _minSimilarity, _detectionIntervalMs);
 
-            // Birinchi marta known faces cache to'lishini kutamiz
-            await _knownCache.ReloadAsync(stoppingToken);
+            // Birinchi marta known faces cache to'lishini KUTAMIZ (force: true).
+            // Xato bo'lsa worker o'lmasligi kerak — keyingi davriy reload cache'ni to'ldiradi.
+            try
+            {
+                await _knownCache.ReloadAsync(stoppingToken, force: true);
+            }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Startda KnownFaceCache yuklanmadi — worker davom etadi (cache keyinroq to'ladi)");
+            }
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -95,9 +127,19 @@ namespace SecureGate.Infrastructure.Services.Implementations
                 {
                     await RefreshCamerasAsync(stoppingToken);
                 }
+                catch (OperationCanceledException) { break; }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Kameralarni yangilashda xato");
+                }
+
+                try
+                {
+                    RunSnapshotRetentionIfDue();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Snapshot retention bosqichida xato");
                 }
 
                 try
@@ -122,48 +164,139 @@ namespace SecureGate.Infrastructure.Services.Implementations
                 .AsNoTracking()
                 .ToListAsync(ct);
 
-            var activeIds = new HashSet<int>(cameras.Select(c => c.Id));
+            var camerasById = cameras
+                .GroupBy(c => c.Id)
+                .ToDictionary(g => g.Key, g => g.First());
 
-            // To'xtatish kerak bo'lganlar (ro'yxatdan tushgan yoki o'chirilgan)
+            // 1) To'xtatish/qayta ishga tushirish kerak bo'lganlar
             foreach (var pair in _streams.ToArray())
             {
-                if (!activeIds.Contains(pair.Key))
-                {
-                    pair.Value.Cancel();
-                    _streams.TryRemove(pair.Key, out _);
-                    _logger.LogInformation("Kamera #{Id} oqimi to'xtatildi", pair.Key);
-                }
+                var handle = pair.Value;
+
+                string? reason = null;
+                if (!camerasById.TryGetValue(pair.Key, out var cam))
+                    reason = "ro'yxatdan chiqdi";
+                else if (!string.Equals(handle.Signature, BuildSignature(cam), StringComparison.Ordinal))
+                    reason = "sozlamalari o'zgardi";
+                else if (handle.Task.IsCompleted)
+                    reason = handle.Task.IsFaulted ? "loop xato bilan tugagan" : "loop to'xtab qolgan";
+
+                if (reason != null)
+                    StopStream(pair.Key, handle, reason);
             }
 
-            // Yangilarini ishga tushirish
-            foreach (var cam in cameras)
+            // 2) Ishlamayotganlarini ishga tushirish (yangilar + qayta tiklanadiganlar)
+            foreach (var cam in camerasById.Values)
             {
                 if (_streams.ContainsKey(cam.Id)) continue;
+                StartStream(cam, ct);
+            }
+        }
 
-                var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                var task = Task.Run(() => RunCameraLoopAsync(cam, cts.Token), cts.Token);
-                _streams[cam.Id] = new CameraStreamHandle(cts, task);
+        private void StartStream(Camera cam, CancellationToken ct)
+        {
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            CameraStreamHandle? handle = null;
+            try
+            {
+                // LongRunning → thread pool'dan EMAS, alohida thread'da ishlaydi.
+                // Delegat async bo'lgani uchun Unwrap() bilan ichki Task'ni olamiz.
+                var task = Task.Factory.StartNew(
+                        () => RunCameraLoopAsync(cam, cts.Token),
+                        cts.Token,
+                        TaskCreationOptions.LongRunning,
+                        TaskScheduler.Default)
+                    .Unwrap();
+
+                handle = new CameraStreamHandle(cts, task, BuildSignature(cam));
+                _streams[cam.Id] = handle;
                 _logger.LogInformation("Kamera #{Id} ({Name}) oqimi boshlandi", cam.Id, cam.Name);
             }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kamera #{Id} oqimini ishga tushirishda xato", cam.Id);
+                if (handle == null) cts.Dispose();
+            }
+        }
+
+        private void StopStream(int cameraId, CameraStreamHandle handle, string reason)
+        {
+            _streams.TryRemove(new KeyValuePair<int, CameraStreamHandle>(cameraId, handle));
+            handle.Cancel();
+            handle.DisposeWhenCompleted();
+            _logger.LogInformation("Kamera #{Id} oqimi to'xtatildi ({Reason})", cameraId, reason);
+        }
+
+        // Kameraning oqimga ta'sir qiluvchi maydonlaridan barmoq izi.
+        // O'zgarsa — oqim to'xtatilib qayta ishga tushiriladi.
+        private static string BuildSignature(Camera cam)
+        {
+            var raw = string.Join('|',
+                cam.StreamUrl ?? "",
+                cam.AiStreamUrl ?? "",
+                cam.Username ?? "",
+                cam.Password ?? "",
+                ((int)cam.Type).ToString(CultureInfo.InvariantCulture),
+                cam.IpAddress ?? "",
+                cam.Port.ToString(CultureInfo.InvariantCulture),
+                // Vendor/NVR maydonlari ham URL'ga ta'sir qiladi -> ular o'zgarsa oqim qayta ishga tushishi kerak.
+                ((int)cam.CameraModel).ToString(CultureInfo.InvariantCulture),
+                ((int)cam.DeviceKind).ToString(CultureInfo.InvariantCulture),
+                cam.ChannelNumber?.ToString(CultureInfo.InvariantCulture) ?? "");
+
+            var hash = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
+            return Convert.ToHexString(hash);
         }
 
         // Bir kamera uchun davomli loop. RTSP ochiladi, frame'lar o'qiladi.
         // Xato bo'lsa qisqa pauza qilib qayta ulanishga urinamiz.
         private async Task RunCameraLoopAsync(Camera cam, CancellationToken ct)
         {
-            var streamUrl = BuildStreamUrl(cam);
-
             while (!ct.IsCancellationRequested)
             {
+                string streamUrl;
+                try
+                {
+                    // URL yasash ham xato berishi mumkin (parol deshifrlash, noto'g'ri URI) —
+                    // bu loop'ni butunlay o'ldirmasligi kerak.
+                    // Yuz tanish uchun SUB-stream afzal (AiStreamUrl -> StreamUrl -> vendor shabloni).
+                    streamUrl = _urlBuilder.BuildLive(cam, StreamPurpose.Sub) ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(streamUrl))
+                    {
+                        _logger.LogError("Kamera #{Id} uchun oqim URL yasab bo'lmadi", cam.Id);
+                        await Task.Delay(TimeSpan.FromSeconds(30), ct);
+                        continue;
+                    }
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Kamera #{Id} uchun oqim URL yasashda xato", cam.Id);
+                    try { await Task.Delay(TimeSpan.FromSeconds(30), ct); }
+                    catch (OperationCanceledException) { break; }
+                    continue;
+                }
+
                 try
                 {
                     using var capture = new VideoCapture(streamUrl);
-                    // RTSP buferi katta bo'lsa lag bo'ladi; bufer hajmini kichik qilamiz
+
+                    // DIQQAT: CAP_PROP_BUFFERSIZE OpenCV'ning FFMPEG backend'ida (RTSP/HTTP)
+                    // UMUMAN QO'LLANMAYDI — u faqat DSHOW / V4L2 / GStreamer backend'larida ishlaydi.
+                    // Ya'ni bu chaqiruv RTSP uchun hech narsa qilmaydi va lag'dan HIMOYA QILMAYDI;
+                    // unga tayanib bo'lmaydi. O'chirilmadi: boshqa backend (lokal USB kamera va h.k.)
+                    // ishlatilsa foydali bo'ladi.
+                    // Kechikishga qarshi haqiqiy himoya:
+                    //   1) OpenCvBootstrap.Configure() dagi fflags;nobuffer / flags;low_delay /
+                    //      max_delay / reorder_queue_size FFMPEG flaglari;
+                    //   2) bu yerda kadr o'qish sikli HECH QACHON uxlamaydi — throttle faqat
+                    //      ProcessFrameAsync chaqirig'ini cheklaydi, Read esa har iteratsiyada
+                    //      bajariladi, shuning uchun demuxer navbati to'planib qolmaydi.
                     capture.Set(VideoCaptureProperties.BufferSize, 1);
 
                     if (!capture.IsOpened())
                     {
-                        _logger.LogWarning("Kamera #{Id} ulanmadi: {Url}", cam.Id, MaskUrl(streamUrl));
+                        _logger.LogWarning("Kamera #{Id} ulanmadi: {Url}", cam.Id, _urlBuilder.Mask(streamUrl));
                         await Task.Delay(TimeSpan.FromSeconds(5), ct);
                         continue;
                     }
@@ -201,9 +334,11 @@ namespace SecureGate.Infrastructure.Services.Implementations
         private async Task ProcessFrameAsync(Camera cam, Mat frame, CancellationToken ct)
         {
             byte[] jpegBytes;
+            byte[]? snapshotBytes = null;   // faqat kerak bo'lganda (dispatch paytida) yasaladi
             int frameWidth, frameHeight;
             try
             {
+                // Aniqlash uchun TO'LIQ o'lchamli kadr kerak (kichraytirilsa yuz topilmay qoladi).
                 jpegBytes = frame.ImEncode(".jpg");
                 frameWidth = frame.Width;
                 frameHeight = frame.Height;
@@ -219,6 +354,7 @@ namespace SecureGate.Infrastructure.Services.Implementations
             {
                 faces = await _engine.DetectFacesAsync(jpegBytes, ct);
             }
+            catch (OperationCanceledException) { return; }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Yuz aniqlashda xato (camera #{Id})", cam.Id);
@@ -289,9 +425,13 @@ namespace SecureGate.Infrastructure.Services.Implementations
                     continue;
                 _lastDispatchAt[key] = now;
 
+                // Snapshot diskka yoziladi → kichraytirilgan/siqilgan variantni uzatamiz.
+                // Bir frame ichida bir marta hisoblanadi va barcha yuzlar uchun qayta ishlatiladi.
+                snapshotBytes ??= EncodeSnapshot(frame, cam.Id);
+
                 var ev = new FaceMatchEvent(
                     cam.Id, personType, personId, fullName, confidence,
-                    jpegBytes, face.Box, frameWidth, frameHeight);
+                    snapshotBytes, face.Box, frameWidth, frameHeight);
 
                 // Kamera turi bo'yicha yo'naltiramiz:
                 //   Turnstile → AccessLog + turniket ochish (FaceMatchHandler)
@@ -301,6 +441,20 @@ namespace SecureGate.Infrastructure.Services.Implementations
 
             // Frame oxirida — frontend qutilarni darhol sinxronlashi uchun
             await NotifyFrameProcessedAsync(cam.Id, activePersonKeys, ct);
+        }
+
+        // Diskka yoziladigan snapshot: maks 640px kenglik, JPEG q75 (config'dan sozlanadi).
+        private byte[] EncodeSnapshot(Mat frame, int cameraId)
+        {
+            try
+            {
+                return SnapshotImage.Encode(frame, _snapshotMaxWidth, _snapshotQuality);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Snapshot kodlashda xato (camera #{Id})", cameraId);
+                return Array.Empty<byte>();
+            }
         }
 
         // Har frame'da chaqiriladi — UI yashil quti uzluksiz yangilanishi uchun.
@@ -328,7 +482,8 @@ namespace SecureGate.Infrastructure.Services.Implementations
                         fw = frameWidth,
                         fh = frameHeight
                     },
-                    time = DateTime.Now.ToString("HH:mm:ss")
+                    // Tarmoqda HAMMA VAQT UTC, ISO-8601 ("O") — formatlash frontend ishi.
+                    time = DateTime.UtcNow.ToString("O")
                 }, ct);
             }
             catch (Exception ex)
@@ -399,108 +554,109 @@ namespace SecureGate.Infrastructure.Services.Implementations
                     await handler.HandleAsync(ev, ct);
                 }
             }
+            catch (OperationCanceledException) { }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Yuz handler'ini chaqirishda xato (camera #{Id}, type {Type})", ev.CameraId, cameraType);
             }
         }
 
-        // Yuz tanish uchun qaysi oqimni ishlatish kerakligini hal qiladi:
-        //   1) AiStreamUrl mavjud bo'lsa — uni ishlatamiz (sub-stream, 480p/720p — CPU/GPU tejaladi)
-        //   2) Aks holda StreamUrl — main stream (FullHD/4K)
-        //   3) StreamUrl ham yo'q bo'lsa — IP/Port'dan Hikvision uslubida yasaymiz (sub-stream — channel 102)
-        // 500+ kamerali deployment'larda AiStreamUrl ishlatish ishlash unumdorligini sezilarli yaxshilaydi.
-        private string BuildStreamUrl(Camera cam)
+        // ===== Snapshot retention =====
+        // Eski snapshot fayllari cheksiz to'planmasligi uchun kuniga bir marta tozalash.
+        // Config: FaceRecognition:SnapshotRetentionDays (default 30; 0 yoki manfiy — o'chirilgan).
+        private void RunSnapshotRetentionIfDue()
         {
-            // Variant 1: AI sub-stream (afzallik)
-            if (!string.IsNullOrWhiteSpace(cam.AiStreamUrl)
-                && (cam.AiStreamUrl.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase)
-                    || cam.AiStreamUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)))
+            if (_snapshotRetentionDays <= 0) return;
+            if ((DateTime.UtcNow - _lastRetentionRunUtc).TotalHours < 24) return;
+            _lastRetentionRunUtc = DateTime.UtcNow;
+
+            var webRoot = _env.WebRootPath;
+            if (string.IsNullOrWhiteSpace(webRoot)) return;
+
+            var dir = Path.Combine(webRoot, "uploads", "snapshots");
+            if (!Directory.Exists(dir)) return;
+
+            var cutoff = DateTime.UtcNow.AddDays(-_snapshotRetentionDays);
+            int deleted = 0, failed = 0;
+
+            foreach (var file in Directory.EnumerateFiles(dir, "*.jpg", SearchOption.TopDirectoryOnly))
             {
-                return InjectCredentials(cam.AiStreamUrl, cam);
+                try
+                {
+                    if (File.GetLastWriteTimeUtc(file) >= cutoff) continue;
+                    File.Delete(file);
+                    deleted++;
+                }
+                catch
+                {
+                    failed++;
+                }
             }
 
-            // Variant 2: main stream (faqat AI sub-stream yo'q bo'lganda)
-            if (!string.IsNullOrWhiteSpace(cam.StreamUrl)
-                && (cam.StreamUrl.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase)
-                    || cam.StreamUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)))
-            {
-                return InjectCredentials(cam.StreamUrl, cam);
-            }
-
-            // Variant 3: IpAddress'dan yasaymiz — Hikvision sub-stream (channel 102 = 480p/720p)
-            var user = cam.Username ?? "";
-            var pass = _credProtector.Unprotect(cam.Password) ?? "";
-            var creds = !string.IsNullOrEmpty(user) ? $"{Uri.EscapeDataString(user)}:{Uri.EscapeDataString(pass)}@" : "";
-            // Channel 102 — sub-stream (Hikvision/Dahua standart konventsiyasi)
-            return $"rtsp://{creds}{cam.IpAddress}:{cam.Port}/Streaming/Channels/102";
-        }
-
-        // Agar StreamUrl'da login bo'lmasa, DB'dagi shifrlangan parolni qo'shamiz.
-        private string InjectCredentials(string streamUrl, Camera cam)
-        {
-            try
-            {
-                var uri = new Uri(streamUrl);
-                if (!string.IsNullOrEmpty(uri.UserInfo)) return streamUrl;
-
-                var user = cam.Username;
-                if (string.IsNullOrEmpty(user)) return streamUrl;
-
-                var pass = _credProtector.Unprotect(cam.Password) ?? "";
-                var creds = $"{Uri.EscapeDataString(user)}:{Uri.EscapeDataString(pass)}";
-
-                var builder = new UriBuilder(uri) { UserName = "" };
-                // UriBuilder shaxsiy ma'lumotni "user:pass" qilib qo'shishni yoqtirmaydi —
-                // qo'lda yasaymiz.
-                return $"{uri.Scheme}://{creds}@{uri.Authority}{uri.PathAndQuery}";
-            }
-            catch
-            {
-                return streamUrl;
-            }
-        }
-
-        private static string MaskUrl(string url)
-        {
-            try
-            {
-                var uri = new Uri(url);
-                if (string.IsNullOrEmpty(uri.UserInfo)) return url;
-                return $"{uri.Scheme}://***:***@{uri.Authority}{uri.PathAndQuery}";
-            }
-            catch { return url; }
+            if (deleted > 0 || failed > 0)
+                _logger.LogInformation("Snapshot retention: {Deleted} ta fayl o'chirildi, {Failed} ta xato ({Days} kundan eski)",
+                    deleted, failed, _snapshotRetentionDays);
         }
 
         private async Task StopAllAsync()
         {
-            foreach (var pair in _streams.ToArray())
-            {
-                pair.Value.Cancel();
-            }
+            var handles = _streams.ToArray();
 
-            foreach (var pair in _streams.ToArray())
+            foreach (var pair in handles)
+                pair.Value.Cancel();
+
+            foreach (var pair in handles)
             {
                 try { await pair.Value.Task; } catch { }
+                pair.Value.Dispose();
             }
 
             _streams.Clear();
         }
 
-        private sealed class CameraStreamHandle
+        public override void Dispose()
         {
+            foreach (var pair in _streams.ToArray())
+            {
+                pair.Value.Cancel();
+                pair.Value.DisposeWhenCompleted();
+            }
+            _streams.Clear();
+            base.Dispose();
+        }
+
+        private sealed class CameraStreamHandle : IDisposable
+        {
+            private int _disposed;
+
             public CancellationTokenSource Cts { get; }
             public Task Task { get; }
 
-            public CameraStreamHandle(CancellationTokenSource cts, Task task)
+            /// <summary>Kamera sozlamalarining barmoq izi — o'zgarsa oqim qayta ishga tushiriladi.</summary>
+            public string Signature { get; }
+
+            public CameraStreamHandle(CancellationTokenSource cts, Task task, string signature)
             {
                 Cts = cts;
                 Task = task;
+                Signature = signature;
             }
 
             public void Cancel()
             {
                 try { Cts.Cancel(); } catch { }
+            }
+
+            /// <summary>Loop tugagach CTS'ni dispose qiladi (loop hali ishlatayotgan bo'lishi mumkin).</summary>
+            public void DisposeWhenCompleted()
+            {
+                Task.ContinueWith(_ => Dispose(), TaskScheduler.Default);
+            }
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+                try { Cts.Dispose(); } catch { }
             }
         }
     }

@@ -19,10 +19,12 @@ namespace SecureGate.Domain.People
         public string Subject { get; set; } = string.Empty;
 
         [Phone]
+        [StringLength(20)]
         [Display(Name = "Telefon")]
         public string? Phone { get; set; }
 
         [EmailAddress]
+        [StringLength(256)]
         [Display(Name = "Email")]
         public string? Email { get; set; }
 
@@ -36,6 +38,7 @@ namespace SecureGate.Domain.People
         public TeacherStatus Status { get; set; } = TeacherStatus.Active;
 
         [Display(Name = "Rasm")]
+        [StringLength(500)]
         public string? PhotoPath { get; set; }
 
         public bool FaceRecognitionEnabled { get; set; } = true;

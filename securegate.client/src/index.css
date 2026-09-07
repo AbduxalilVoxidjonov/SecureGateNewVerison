@@ -45,13 +45,13 @@ body {
   margin: 0;
   background: var(--bg-0);
   color: var(--text-0);
-  font-family: "DM Sans", system-ui, sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
-.mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-feature-settings: "tnum"; }
+.mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-feature-settings: "tnum"; }
 .tnum { font-variant-numeric: tabular-nums; }
 
 /* Scrollbar */
@@ -103,6 +103,8 @@ body {
 }
 .nav-item {
   display: flex; align-items: center; gap: 10px;
+  width: 100%; text-align: left;
+  background: none; border: none; font: inherit;
   padding: 8px 10px; margin: 1px 0;
   border-radius: var(--r-sm);
   color: var(--text-1);
@@ -122,7 +124,7 @@ body {
   margin-left: auto;
   font-size: 11px; color: var(--text-3);
   background: var(--bg-2); padding: 1px 6px; border-radius: 999px;
-  font-family: "JetBrains Mono", monospace;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
 .nav-item.active .count { background: var(--bg-3); color: var(--text-1); }
 
@@ -178,7 +180,7 @@ body {
 .search svg { position: absolute; left: 10px; top: 9px; color: var(--text-3); }
 .search .kbd {
   position: absolute; right: 8px; top: 7px;
-  font-family: "JetBrains Mono", monospace; font-size: 10.5px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 10.5px;
   color: var(--text-3);
   border: 1px solid var(--border); padding: 1px 6px; border-radius: 4px;
   background: var(--bg-0);
@@ -210,7 +212,7 @@ body {
   border: 1px solid var(--accent-soft);
   border-radius: 999px;
   font-size: 11.5px; font-weight: 500;
-  font-family: "JetBrains Mono", monospace;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   text-transform: uppercase; letter-spacing: 0.06em;
 }
 .live-pill .pulse {
@@ -223,6 +225,43 @@ body {
   70% { box-shadow: 0 0 0 6px oklch(0.72 0.16 158 / 0); }
   100% { box-shadow: 0 0 0 0 oklch(0.72 0.16 158 / 0); }
 }
+
+/* --- live-pill variantlari (real-time holat) --------------------------------
+   Asosiy `.live-pill` — qorong'i chip: fon qattiq oklch bilan berilgan va
+   mavzuga bog'liq emas, shuning uchun variantlar ham shu uslubda yoziladi. */
+
+/* Ulanmoqda / qayta ulanmoqda */
+.live-pill.pending {
+  background: oklch(0.28 0.06 75);
+  color: oklch(0.86 0.14 75);
+  border-color: oklch(0.80 0.16 75 / 0.35);
+}
+.live-pill.pending .pulse {
+  background: oklch(0.86 0.14 75);
+  animation-name: pulse-warn;
+  animation-duration: 1.2s;
+}
+@keyframes pulse-warn {
+  0% { box-shadow: 0 0 0 0 oklch(0.80 0.16 75 / 0.6); }
+  70% { box-shadow: 0 0 0 6px oklch(0.80 0.16 75 / 0); }
+  100% { box-shadow: 0 0 0 0 oklch(0.80 0.16 75 / 0); }
+}
+
+/* Aloqa yo'q */
+.live-pill.dead {
+  background: oklch(0.26 0.02 250);
+  color: oklch(0.72 0.01 250);
+  border-color: oklch(1 0 0 / 0.14);
+}
+.live-pill.dead .pulse { background: oklch(0.62 0.01 250); animation: none; box-shadow: none; }
+
+/* Kamera plitkasi snapshot rejimida (jonli oqim emas) */
+.live-pill.snap {
+  background: oklch(0 0 0 / 0.5);
+  color: oklch(1 0 0 / 0.72);
+  border-color: oklch(1 0 0 / 0.18);
+}
+.live-pill.snap .pulse { background: oklch(1 0 0 / 0.5); animation: none; box-shadow: none; }
 
 /* Content */
 .content {
@@ -314,7 +353,7 @@ body {
 .stat .trend {
   display: inline-flex; align-items: center; gap: 4px;
   margin-top: 8px; font-size: 11.5px;
-  font-family: "JetBrains Mono", monospace;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
 .trend.up { color: var(--accent); }
 .trend.down { color: var(--danger); }
@@ -335,7 +374,7 @@ body {
   font-size: 11px; font-weight: 500;
   padding: 2px 8px; border-radius: 999px;
   text-transform: uppercase; letter-spacing: 0.04em;
-  font-family: "JetBrains Mono", monospace;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
 .pill.on { background: oklch(0.25 0.08 158); color: var(--accent); border: 1px solid var(--accent-soft); }
 .pill.off { background: var(--bg-2); color: var(--text-2); border: 1px solid var(--border); }
@@ -449,13 +488,13 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
 
 .cam-feed .ts {
   position: absolute; top: 8px; right: 12px;
-  font-family: "JetBrains Mono", monospace; font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 11px;
   color: oklch(1 0 0 / 0.7);
   text-shadow: 0 1px 2px oklch(0 0 0 / 0.6);
 }
 .cam-feed .ident {
   position: absolute; top: 8px; left: 12px;
-  font-family: "JetBrains Mono", monospace; font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 11px;
   color: oklch(1 0 0 / 0.65);
   text-shadow: 0 1px 2px oklch(0 0 0 / 0.6);
 }
@@ -465,10 +504,74 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
 .cam-feed .placeholder {
   position: absolute; inset: 0;
   display: grid; place-items: center;
-  font-family: "JetBrains Mono", monospace; font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 11px;
   color: oklch(1 0 0 / 0.25); letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+/* Kamera sahnasi — oqim + to'liq ekran boshqaruvi (Fullscreen API).
+   Boshqaruv elementlari har doim qorong'i tasvir ustida turadi, shuning uchun
+   yorug' mavzuda ham (cam-feed fon qorong'i qoladi) o'qilishi bir xil. */
+.cam-stage { position: relative; }
+.cam-stage-bar {
+  position: absolute; left: 10px; bottom: 10px; z-index: 3;
+  display: flex; align-items: center; gap: 8px;
+  opacity: 0.8; transition: opacity .15s ease;
+}
+.cam-stage:hover .cam-stage-bar,
+.cam-stage-bar:focus-within { opacity: 1; }
+.cam-stage-label {
+  font-size: 12px; color: oklch(1 0 0 / 0.85);
+  text-shadow: 0 1px 2px oklch(0 0 0 / 0.7);
+}
+.cam-stage-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 9px;
+  font: inherit; font-size: 11.5px; font-weight: 500; line-height: 1;
+  color: oklch(1 0 0 / 0.9);
+  background: oklch(0 0 0 / 0.5);
+  border: 1px solid oklch(1 0 0 / 0.18);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: background .15s, border-color .15s;
+}
+.cam-stage-btn:hover:not(:disabled) {
+  background: oklch(0 0 0 / 0.7);
+  border-color: oklch(1 0 0 / 0.35);
+}
+.cam-stage-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.cam-stage-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* To'liq ekran holati. `is-fs` klassi `fullscreenchange` hodisasidan sinxronlanadi,
+   shuning uchun prefikssiz brauzerlarda ham ishonchli ishlaydi. */
+.cam-stage.is-fs {
+  width: 100vw; height: 100vh;
+  background: #000;
+  display: grid; place-items: center;
+}
+.cam-stage.is-fs .cam-feed {
+  width: 100%; height: 100%;
+  aspect-ratio: auto;
+  background: #000;
+  border-radius: 0;
+}
+/* Nisbat buzilmasin — qolgan joy qora bo'lib turadi. */
+.cam-stage.is-fs .cam-video { object-fit: contain; background: #000; }
+.cam-stage.is-fs .cam-feed .corners { display: none; }
+.cam-stage.is-fs .cam-stage-bar { left: 20px; bottom: 20px; }
+.cam-stage.is-fs .cam-feed .ident,
+.cam-stage.is-fs .cam-feed .ts { font-size: 13px; }
+
+/* Brauzerning o'z selektorlari — alohida qoidalar sifatida (bitta ro'yxatda
+   qo'llab-quvvatlanmagan selektor butun qoidani bekor qiladi). */
+.cam-stage:fullscreen { background: #000; }
+.cam-stage:-webkit-full-screen { background: #000; }
+.cam-stage:fullscreen .cam-feed { width: 100%; height: 100%; aspect-ratio: auto; background: #000; }
+.cam-stage:-webkit-full-screen .cam-feed { width: 100%; height: 100%; aspect-ratio: auto; background: #000; }
+.cam-stage:fullscreen .cam-video { object-fit: contain; }
+.cam-stage:-webkit-full-screen .cam-video { object-fit: contain; }
+.cam-stage::backdrop { background: #000; }
+
 .face-box {
   position: absolute;
   border: 1.5px solid var(--accent);
@@ -480,7 +583,7 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
   position: absolute; top: -22px; left: -1px;
   background: var(--accent);
   color: var(--accent-ink);
-  font-family: "JetBrains Mono", monospace; font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 10px;
   padding: 1px 6px; border-radius: 3px; white-space: nowrap;
   font-weight: 600;
 }
@@ -492,7 +595,7 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
   gap: 10px;
 }
 .cam-name { font-size: 13.5px; font-weight: 500; }
-.cam-loc { font-size: 11.5px; color: var(--text-3); font-family: "JetBrains Mono", monospace; }
+.cam-loc { font-size: 11.5px; color: var(--text-3); font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
 
 /* Activity feed */
 .feed-item {
@@ -504,7 +607,7 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
   font-size: 13px;
 }
 .feed-item:last-child { border-bottom: none; }
-.feed-item .t { color: var(--text-3); font-family: "JetBrains Mono", monospace; font-size: 11.5px; }
+.feed-item .t { color: var(--text-3); font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 11.5px; }
 .feed-icon {
   width: 28px; height: 28px; border-radius: 50%;
   display: grid; place-items: center;
@@ -607,7 +710,7 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
     var(--bg-1);
   display: grid; place-items: center;
   color: var(--text-3);
-  font-family: "JetBrains Mono", monospace; font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 11px;
   text-transform: uppercase; letter-spacing: 0.08em;
   text-align: center;
   padding: 14px;
@@ -649,6 +752,7 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
 /* Toggle */
 .toggle {
   display: inline-flex; align-items: center;
+  padding: 0; appearance: none; -webkit-appearance: none;
   width: 36px; height: 20px; border-radius: 999px;
   background: var(--bg-3); border: 1px solid var(--border);
   position: relative; cursor: pointer;
@@ -665,7 +769,7 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
 .toggle.on::after { transform: translateX(15px); background: var(--accent); }
 
 .kbd {
-  font-family: "JetBrains Mono", monospace;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 10.5px;
   background: var(--bg-2);
   border: 1px solid var(--border);
@@ -765,3 +869,44 @@ html[data-theme="light"] .cam-feed {
     repeating-linear-gradient(0deg, oklch(0.16 0.01 250) 0px, oklch(0.16 0.01 250) 1px, oklch(0.20 0.01 250) 1px, oklch(0.20 0.01 250) 3px),
     oklch(0.18 0.01 250);
 }
+
+/* Klaviatura fokusi — nav va toggle uchun aniq ko'rinsin */
+.nav-item:focus-visible,
+.toggle:focus-visible,
+.icon-btn:focus-visible,
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.toggle:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Toast — qisqa xabar (xato / muvaffaqiyat) */
+.toast-host {
+  position: fixed;
+  right: 20px; bottom: 20px;
+  z-index: 200;
+  display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 8px;
+  max-height: calc(100vh - 40px);
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex; align-items: center; gap: 10px;
+  max-width: min(420px, calc(100vw - 40px));
+  padding: 11px 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-0);
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.28);
+  animation: toast-in .16s ease-out;
+}
+.toast.error { border-color: oklch(0.50 0.14 25); background: oklch(0.26 0.07 25); }
+.toast.error svg { color: var(--err, oklch(0.70 0.17 25)); }
+.toast.success { border-color: var(--accent-soft, oklch(0.45 0.10 158)); background: oklch(0.26 0.06 158); }
+.toast.success svg { color: var(--accent); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+html[data-theme="light"] .toast.error { background: oklch(0.96 0.04 25); border-color: oklch(0.85 0.08 25); }
+html[data-theme="light"] .toast.success { background: oklch(0.96 0.04 158); border-color: oklch(0.83 0.08 158); }

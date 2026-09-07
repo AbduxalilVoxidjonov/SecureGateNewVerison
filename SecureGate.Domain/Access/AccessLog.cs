@@ -10,8 +10,8 @@ namespace SecureGate.Domain.Access
         public int Id { get; set; }
 
         [Display(Name = "Vaqt")]
-        // Mahalliy vaqt — UI'da to'g'ridan-to'g'ri ko'rsatiladi (Asia/Tashkent)
-        public DateTime Timestamp { get; set; } = DateTime.Now;
+        // UTC — UI'da mahalliy vaqtga konvertatsiya qilinadi
+        public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 
         [Display(Name = "Usul")]
         public AccessMethod Method { get; set; }
@@ -20,6 +20,7 @@ namespace SecureGate.Domain.Access
         public AccessResult Result { get; set; }
 
         [Display(Name = "Tafsilot")]
+        [StringLength(500)]
         public string? Details { get; set; }
 
         // Foydalanuvchi (biri bo'ladi)
@@ -49,6 +50,7 @@ namespace SecureGate.Domain.Access
 
         // Yuz tanish paytida olingan rasm (tanilgan yoki tanilmagan bo'lsa ham saqlanadi)
         [Display(Name = "Olingan rasm")]
+        [StringLength(500)]
         public string? CapturedImagePath { get; set; }
 
         [NotMapped]

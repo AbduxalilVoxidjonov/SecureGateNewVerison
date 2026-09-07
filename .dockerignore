@@ -1,0 +1,34 @@
+# ===== VCS / IDE =====
+.git
+.gitignore
+.gitattributes
+.github
+.vs
+.vscode
+.idea
+.claude
+
+# ===== .NET build artifacts =====
+**/bin
+**/obj
+*.user
+*.suo
+TestResults
+
+# ===== Node =====
+**/node_modules
+securegate.client/dist
+npm-debug.log*
+yarn-error.log*
+
+# ===== Docker / local =====
+Dockerfile
+.dockerignore
+docker-compose*.yml
+.env
+.env.*
+
+# ===== Docs & misc =====
+**/*.md
+!securegate.client/package.json
+SecureGate.Server/wwwroot

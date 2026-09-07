@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace SecureGate.Domain.Cameras
@@ -55,6 +55,13 @@ namespace SecureGate.Domain.Cameras
         Offline,
         [Display(Name = "Yozib olinyapti")]
         Recording
+    }
+
+    /// <summary>Qurilma turi: to'g'ridan-to'g'ri IP-kamera yoki NVR ning bitta kanali.</summary>
+    public enum DeviceKind
+    {
+        Camera = 0,
+        NvrChannel = 1
     }
 
     public enum CameraType

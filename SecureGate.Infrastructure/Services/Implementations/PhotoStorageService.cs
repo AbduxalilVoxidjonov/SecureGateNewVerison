@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http;
 using SecureGate.Infrastructure.Services.Interfaces;
 
 namespace SecureGate.Infrastructure.Services.Implementations
@@ -6,6 +6,15 @@ namespace SecureGate.Infrastructure.Services.Implementations
     public class PhotoStorageService : IPhotoStorageService
     {
         private static readonly string[] AllowedExtensions = { ".jpg", ".jpeg", ".png", ".webp" };
+
+        // data: URL uchun ruxsat etilgan MIME turlari
+        private static readonly Dictionary<string, string> AllowedMimeTypes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["image/jpeg"] = ".jpg",
+            ["image/png"] = ".png",
+            ["image/webp"] = ".webp"
+        };
+
         private const long MaxBytes = 5 * 1024 * 1024; // 5 MB
 
         private readonly IWebHostEnvironment _env;
@@ -41,8 +50,6 @@ namespace SecureGate.Infrastructure.Services.Implementations
             if (!string.IsNullOrWhiteSpace(base64DataUrl))
             {
                 var (bytes, ext) = ParseDataUrl(base64DataUrl);
-                if (bytes.Length > MaxBytes)
-                    throw new InvalidOperationException("Rasm hajmi 5 MB dan oshmasligi kerak.");
 
                 var fileName = $"{Guid.NewGuid():N}{ext}";
                 var pathAbs = Path.Combine(folderAbs, fileName);
@@ -59,8 +66,28 @@ namespace SecureGate.Infrastructure.Services.Implementations
             if (string.IsNullOrWhiteSpace(webPath)) return;
             if (!webPath.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase)) return;
 
-            var relative = webPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
-            var abs = Path.Combine(_env.WebRootPath, relative);
+            // Path traversal himoyasi: normallashtirilgan yo'l "wwwroot/uploads" ichida
+            // qolishini majburiy tekshiramiz ("/uploads/../../appsettings.json" kabi
+            // qiymatlar wwwroot'dan tashqariga chiqib ketmasligi uchun).
+            string uploadsRoot, abs;
+            try
+            {
+                uploadsRoot = Path.GetFullPath(Path.Combine(_env.WebRootPath, "uploads"));
+                var relative = webPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+                abs = Path.GetFullPath(Path.Combine(_env.WebRootPath, relative));
+            }
+            catch
+            {
+                return; // noto'g'ri yo'l — hech narsa o'chirmaymiz
+            }
+
+            var prefix = uploadsRoot.EndsWith(Path.DirectorySeparatorChar)
+                ? uploadsRoot
+                : uploadsRoot + Path.DirectorySeparatorChar;
+
+            if (!abs.StartsWith(prefix, StringComparison.Ordinal))
+                return;
+
             if (File.Exists(abs))
             {
                 try { File.Delete(abs); } catch { /* ignore */ }
@@ -77,9 +104,23 @@ namespace SecureGate.Infrastructure.Services.Implementations
             var header = dataUrl.Substring(0, commaIdx);
             var payload = dataUrl.Substring(commaIdx + 1);
 
-            string ext = ".png";
-            if (header.Contains("image/jpeg", StringComparison.OrdinalIgnoreCase)) ext = ".jpg";
-            else if (header.Contains("image/webp", StringComparison.OrdinalIgnoreCase)) ext = ".webp";
+            // 1) Header "data:image/..." bo'lishi SHART
+            if (!header.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Faqat rasm (data:image/...) qabul qilinadi.");
+
+            // 2) MIME turi oq ro'yxatda bo'lishi kerak
+            var mime = header.Substring("data:".Length);
+            var semicolon = mime.IndexOf(';');
+            if (semicolon >= 0) mime = mime.Substring(0, semicolon);
+
+            if (!AllowedMimeTypes.TryGetValue(mime.Trim(), out var ext))
+                throw new InvalidOperationException("Faqat image/jpeg, image/png, image/webp formatlari qabul qilinadi.");
+
+            // 3) Hajmni DEKODDAN OLDIN taxminlab rad etamiz —
+            //    aks holda 100 MB'lik base64 avval xotiraga dekodlanardi.
+            var approximateBytes = (long)payload.Length / 4 * 3;
+            if (approximateBytes > MaxBytes)
+                throw new InvalidOperationException("Rasm hajmi 5 MB dan oshmasligi kerak.");
 
             byte[] bytes;
             try
@@ -90,6 +131,10 @@ namespace SecureGate.Infrastructure.Services.Implementations
             {
                 throw new InvalidOperationException("Rasm base64 ma'lumotlari noto'g'ri.");
             }
+
+            // 4) Aniq hajmni ham tekshiramiz
+            if (bytes.LongLength > MaxBytes)
+                throw new InvalidOperationException("Rasm hajmi 5 MB dan oshmasligi kerak.");
 
             return (bytes, ext);
         }

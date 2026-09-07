@@ -31,7 +31,7 @@ namespace SecureGate.Api.Controllers
         public async Task<IActionResult> GetById(int id)
         {
             var staff = await _staffService.GetByIdAsync(id);
-            if (staff == null) return FailResponse("Xodim topilmadi.", StatusCodes.Status404NotFound);
+            if (staff == null) return NotFoundResponse("Xodim topilmadi.");
             return OkResponse(staff);
         }
 
@@ -66,7 +66,7 @@ namespace SecureGate.Api.Controllers
             try
             {
                 var ok = await _staffService.UpdateAsync(model);
-                if (!ok) return FailResponse("Xodim topilmadi.", StatusCodes.Status404NotFound);
+                if (!ok) return NotFoundResponse("Xodim topilmadi.");
                 return OkResponse("Xodim yangilandi.");
             }
             catch (InvalidOperationException ex)
@@ -80,6 +80,10 @@ namespace SecureGate.Api.Controllers
         [SwaggerOperation(Summary = "Xodimni o'chirish")]
         public async Task<IActionResult> Delete(int id)
         {
+            // Servis Task qaytaradi — yo'q yozuv uchun 200 qaytmasligi kerak.
+            if (await _staffService.GetByIdAsync(id) is null)
+                return NotFoundResponse("Xodim topilmadi.");
+
             await _staffService.DeleteAsync(id);
             return OkResponse("Xodim o'chirildi.");
         }

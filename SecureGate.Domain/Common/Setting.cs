@@ -13,9 +13,11 @@ namespace SecureGate.Domain.Common
         [StringLength(100)]
         public string Key { get; set; } = string.Empty;
 
+        [StringLength(2000)]
         public string? Value { get; set; }
 
         [Display(Name = "Tavsif")]
+        [StringLength(500)]
         public string? Description { get; set; }
 
         [Display(Name = "Tur")]

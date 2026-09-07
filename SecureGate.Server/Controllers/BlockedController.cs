@@ -22,7 +22,8 @@ namespace SecureGate.Api.Controllers
         [SwaggerOperation(Summary = "Bloklangan o'quvchilar ro'yxati")]
         public async Task<IActionResult> Index([FromQuery] int page = 1, [FromQuery] int pageSize = 100)
         {
-            var model = await _usersService.GetStudentsAsync(null, null, StudentStatus.Blocked, page, pageSize);
+            var (safePage, safeSize) = Paging(page, pageSize);
+            var model = await _usersService.GetStudentsAsync(null, StudentStatus.Blocked, safePage, safeSize);
             return OkResponse(new
             {
                 items = model.Students,

@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Icon } from "../components/Icon";
 import { useAuth } from "../auth/AuthContext";
+import { takeLoginNotice } from "./utils";
 
 const LoginScreen = () => {
   const { login } = useAuth();
@@ -10,10 +11,13 @@ const LoginScreen = () => {
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Sessiya tashqaridan yopilgan bo'lsa (masalan parol o'zgartirilgach) — bir martalik xabar.
+  const [notice, setNotice] = useState(takeLoginNotice);
 
   const submit = async (e) => {
     e.preventDefault();
     setError(null);
+    setNotice(null);
     setBusy(true);
     try {
       await login(email, password, rememberMe);
@@ -57,6 +61,13 @@ const LoginScreen = () => {
             <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} />
             <span>Meni eslab qol</span>
           </label>
+
+          {notice && !error && (
+            <div className="row" style={{ gap: 8, padding: "9px 12px", borderRadius: 8, fontSize: 13,
+              background: "var(--bg-1)", color: "var(--text-1)", border: "1px solid var(--border-strong)" }}>
+              <Icon name="check" size={15} /> {notice}
+            </div>
+          )}
 
           {error && (
             <div className="row" style={{ gap: 8, padding: "9px 12px", borderRadius: 8, fontSize: 13,

@@ -167,10 +167,12 @@ namespace SecureGate.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<string>("CapturedImagePath")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("Details")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<double?>("FaceConfidence")
                         .HasColumnType("float");
@@ -207,6 +209,8 @@ namespace SecureGate.Data.Migrations
                     b.HasIndex("TeacherId");
 
                     b.HasIndex("TurnstileId");
+
+                    b.HasIndex("Timestamp", "Result");
 
                     b.ToTable("AccessLogs");
                 });
@@ -247,6 +251,8 @@ namespace SecureGate.Data.Migrations
 
                     b.HasIndex("TurnstileId");
 
+                    b.HasIndex("IsRead", "CreatedAt");
+
                     b.ToTable("Alerts");
                 });
 
@@ -268,7 +274,8 @@ namespace SecureGate.Data.Migrations
                         .HasColumnType("bit");
 
                     b.Property<string>("IpAddress")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(45)
+                        .HasColumnType("nvarchar(45)");
 
                     b.Property<DateTime?>("LastActivityTime")
                         .HasColumnType("datetime2");
@@ -277,7 +284,8 @@ namespace SecureGate.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<string>("Location")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<int>("Model")
                         .HasColumnType("int");
@@ -310,11 +318,19 @@ namespace SecureGate.Data.Migrations
 
                     b.Property<string>("Uptime")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.HasKey("Id");
 
                     b.HasIndex("LinkedCameraId");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.HasIndex("IpAddress", "Port")
+                        .IsUnique()
+                        .HasFilter("[IpAddress] IS NOT NULL");
 
                     b.ToTable("Turnstiles");
                 });
@@ -382,7 +398,8 @@ namespace SecureGate.Data.Migrations
 
                     b.Property<string>("FullName")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -498,7 +515,8 @@ namespace SecureGate.Data.Migrations
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("AiStreamUrl")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("CameraCode")
                         .IsRequired()
@@ -511,11 +529,17 @@ namespace SecureGate.Data.Migrations
                     b.Property<int>("CameraModel")
                         .HasColumnType("int");
 
+                    b.Property<int?>("ChannelNumber")
+                        .HasColumnType("int");
+
                     b.Property<bool>("ContinuousRecording")
                         .HasColumnType("bit");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<int>("DeviceKind")
+                        .HasColumnType("int");
 
                     b.Property<bool>("FaceRecognitionEnabled")
                         .HasColumnType("bit");
@@ -524,7 +548,8 @@ namespace SecureGate.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<string>("IpAddress")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(45)
+                        .HasColumnType("nvarchar(45)");
 
                     b.Property<bool>("MotionDetection")
                         .HasColumnType("bit");
@@ -535,7 +560,8 @@ namespace SecureGate.Data.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("Password")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
 
                     b.Property<int>("Port")
                         .HasColumnType("int");
@@ -550,13 +576,15 @@ namespace SecureGate.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<string>("StreamUrl")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<int>("Type")
                         .HasColumnType("int");
 
                     b.Property<string>("Username")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.HasKey("Id");
 
@@ -564,6 +592,14 @@ namespace SecureGate.Data.Migrations
                         .IsUnique();
 
                     b.HasIndex("CameraGroupId");
+
+                    b.HasIndex("IpAddress", "Port")
+                        .IsUnique()
+                        .HasFilter("[IpAddress] IS NOT NULL AND [DeviceKind] = 0");
+
+                    b.HasIndex("IpAddress", "Port", "ChannelNumber")
+                        .IsUnique()
+                        .HasFilter("[IpAddress] IS NOT NULL AND [ChannelNumber] IS NOT NULL");
 
                     b.ToTable("Cameras");
                 });
@@ -671,7 +707,8 @@ namespace SecureGate.Data.Migrations
 
                     b.Property<string>("ImagePath")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -687,7 +724,9 @@ namespace SecureGate.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("StaffId");
+                    b.HasIndex("StaffId")
+                        .IsUnique()
+                        .HasFilter("[StaffId] IS NOT NULL");
 
                     b.HasIndex("StudentId")
                         .IsUnique()
@@ -709,7 +748,8 @@ namespace SecureGate.Data.Migrations
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Description")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("Key")
                         .IsRequired()
@@ -720,7 +760,8 @@ namespace SecureGate.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<string>("Value")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
 
                     b.HasKey("Id");
 
@@ -742,17 +783,20 @@ namespace SecureGate.Data.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<string>("BlockedBy")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("Duration")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<DateTime?>("ExpiresAt")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("Reason")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<int>("ReasonType")
                         .HasColumnType("int");
@@ -808,10 +852,12 @@ namespace SecureGate.Data.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<string>("Phone")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<string>("PhotoPath")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("Position")
                         .IsRequired()
@@ -841,7 +887,8 @@ namespace SecureGate.Data.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<string>("Email")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
 
                     b.Property<int>("ExperienceYears")
                         .HasColumnType("int");
@@ -858,10 +905,12 @@ namespace SecureGate.Data.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<string>("Phone")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<string>("PhotoPath")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<int>("Position")
                         .HasColumnType("int");
@@ -876,7 +925,7 @@ namespace SecureGate.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Teacher");
+                    b.ToTable("Teacher", (string)null);
                 });
 
             modelBuilder.Entity("SecureGate.Domain.People.Users", b =>
@@ -888,7 +937,8 @@ namespace SecureGate.Data.Migrations
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Address")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -913,13 +963,16 @@ namespace SecureGate.Data.Migrations
                         .HasColumnType("nvarchar(50)");
 
                     b.Property<string>("ParentPhone")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<string>("Phone")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<string>("PhotoPath")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<bool>("SmsNotification")
                         .HasColumnType("bit");
@@ -928,7 +981,6 @@ namespace SecureGate.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<string>("StudentId")
-                        .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
@@ -938,7 +990,8 @@ namespace SecureGate.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("StudentId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[StudentId] IS NOT NULL");
 
                     b.ToTable("Students");
                 });
@@ -998,11 +1051,13 @@ namespace SecureGate.Data.Migrations
                 {
                     b.HasOne("SecureGate.Domain.Cameras.Camera", "Camera")
                         .WithMany()
-                        .HasForeignKey("CameraId");
+                        .HasForeignKey("CameraId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("SecureGate.Domain.People.Staff", "Staff")
                         .WithMany("AccessLogs")
-                        .HasForeignKey("StaffId");
+                        .HasForeignKey("StaffId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("SecureGate.Domain.People.Users", "Student")
                         .WithMany("AccessLogs")
@@ -1011,7 +1066,8 @@ namespace SecureGate.Data.Migrations
 
                     b.HasOne("SecureGate.Domain.People.Teacher", "Teacher")
                         .WithMany("AccessLogs")
-                        .HasForeignKey("TeacherId");
+                        .HasForeignKey("TeacherId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("SecureGate.Domain.Access.Turnstile", "Turnstile")
                         .WithMany("AccessLogs")
@@ -1058,15 +1114,18 @@ namespace SecureGate.Data.Migrations
                 {
                     b.HasOne("SecureGate.Domain.People.Staff", "Staff")
                         .WithMany("TurnstilePermissions")
-                        .HasForeignKey("StaffId");
+                        .HasForeignKey("StaffId")
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("SecureGate.Domain.People.Users", "Student")
                         .WithMany("TurnstilePermissions")
-                        .HasForeignKey("StudentId");
+                        .HasForeignKey("StudentId")
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("SecureGate.Domain.People.Teacher", "Teacher")
                         .WithMany("TurnstilePermissions")
-                        .HasForeignKey("TeacherId");
+                        .HasForeignKey("TeacherId")
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("SecureGate.Domain.Access.Turnstile", "Turnstile")
                         .WithMany("Permissions")
@@ -1087,7 +1146,8 @@ namespace SecureGate.Data.Migrations
                 {
                     b.HasOne("SecureGate.Domain.People.Staff", "Staff")
                         .WithMany()
-                        .HasForeignKey("StaffId");
+                        .HasForeignKey("StaffId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Staff");
                 });
@@ -1126,7 +1186,8 @@ namespace SecureGate.Data.Migrations
                 {
                     b.HasOne("SecureGate.Domain.Cameras.CameraGroup", "CameraGroup")
                         .WithMany("Cameras")
-                        .HasForeignKey("CameraGroupId");
+                        .HasForeignKey("CameraGroupId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("CameraGroup");
                 });
@@ -1166,15 +1227,18 @@ namespace SecureGate.Data.Migrations
                 {
                     b.HasOne("SecureGate.Domain.People.Staff", "Staff")
                         .WithMany()
-                        .HasForeignKey("StaffId");
+                        .HasForeignKey("StaffId")
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("SecureGate.Domain.People.Users", "Student")
                         .WithMany("FaceDataList")
-                        .HasForeignKey("StudentId");
+                        .HasForeignKey("StudentId")
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("SecureGate.Domain.People.Teacher", "Teacher")
                         .WithMany()
-                        .HasForeignKey("TeacherId");
+                        .HasForeignKey("TeacherId")
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("Staff");
 
@@ -1192,7 +1256,7 @@ namespace SecureGate.Data.Migrations
                     b.HasOne("SecureGate.Domain.People.Users", "Student")
                         .WithOne("BlockedUser")
                         .HasForeignKey("SecureGate.Domain.People.BlockedUser", "StudentId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("SecureGate.Domain.People.Teacher", "Teacher")
                         .WithMany()

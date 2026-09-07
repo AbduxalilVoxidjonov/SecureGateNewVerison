@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using SecureGate.Data;
 using SecureGate.Domain;
 using SecureGate.Infrastructure.Services.Interfaces;
@@ -27,6 +27,10 @@ namespace SecureGate.Infrastructure.Services.Implementations
             int page,
             int pageSize)
         {
+            // Sahifalash chegaralari — mijoz pageSize=1000000 yuborib DB'ni cho'ktira olmasligi uchun.
+            page = Math.Max(1, page);
+            pageSize = Math.Clamp(pageSize, 1, 200);
+
             var query = _db.CameraUsers
                 .Include(c => c.Camera)
                 .Include(c => c.Student)

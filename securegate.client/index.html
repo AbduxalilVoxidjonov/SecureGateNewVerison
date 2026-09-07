@@ -2,12 +2,18 @@
 <html lang="uz">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Qat'iy CSP — on-prem xavfsizlik tizimi uchun tashqi manbalar taqiqlanadi.
+      Eslatma: bu meta faqat qo'shimcha qatlam; ishonchli himoya uchun server
+      (nginx/Kestrel) ham shu sarlavhani yuborishi kerak.
+      DIQQAT: `npm run dev` (Vite HMR) inline skript ishlatadi — dev rejimda bu
+      CSP HMR'ni bloklaydi. Prod build (`npm run build`/`preview`) toza ishlaydi.
+    -->
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SecureGate — IP Camera & Access Control</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div id="root"></div>

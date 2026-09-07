@@ -1,0 +1,99 @@
+name: securegate
+
+services:
+  # ============================================================
+  # Ma'lumotlar bazasi
+  # ------------------------------------------------------------
+  # Azure SQL Edge tanlandi, chunki `mcr.microsoft.com/mssql/server`
+  # image'i faqat linux/amd64 (Apple Silicon'da sekin emulyatsiya talab
+  # qiladi va tez-tez yiqiladi). Azure SQL Edge esa linux/arm64 va
+  # linux/amd64 uchun native manifestga ega, T-SQL jihatidan SQL Server
+  # bilan mos — EF Core `UseSqlServer` provideri o'zgarishsiz ishlaydi.
+  # ============================================================
+  db:
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    container_name: securegate-db
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "1"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-SecureGate_Str0ng!Pass}
+      MSSQL_PID: Developer
+    ports:
+      # Faqat lokal debug uchun (SSMS / Azure Data Studio). Kerak bo'lmasa o'chirish mumkin.
+      - "14330:1433"
+    volumes:
+      - securegate-mssql-data:/var/opt/mssql
+    healthcheck:
+      # azure-sql-edge image'ida sqlcmd yo'q, shuning uchun bash /dev/tcp bilan
+      # 1433 portining ochilishini kutamiz. Haqiqiy "login ready" holatini
+      # ilovaning migratsiya retry mantiqi (Program.cs) hal qiladi.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/1433' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  # ============================================================
+  # SPA + API + Swagger (bitta ASP.NET Core konteyneri)
+  # ============================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: securegate-app:local
+    container_name: securegate-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Konteyner ichida ham tashqi ham 3333 — 8080 ishlatilmaydi.
+      ASPNETCORE_URLS: http://+:3333
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+
+      ConnectionStrings__DefaultConnection: >-
+        Server=db,1433;Database=SecureGateDb;User Id=sa;Password=${MSSQL_SA_PASSWORD:-SecureGate_Str0ng!Pass};TrustServerCertificate=True;MultipleActiveResultSets=true;Encrypt=False
+
+      # SPA va API bitta origin'da (http://localhost:3333) — CORS amalda kerak emas,
+      # lekin appsettings.json'dagi qotib qolgan 51985 portini almashtiramiz.
+      Cors__AllowedOrigins__0: http://localhost:3333
+      Cors__AllowedOrigins__1: http://127.0.0.1:3333
+
+      # DIQQAT: quyidagi default FAQAT lokal ishlab chiqish uchun va git'da ochiq turadi.
+      # Productionda JWT_KEY ni .env orqali kamida 32 baytli tasodifiy qiymatga almashtiring:
+      #   openssl rand -base64 48
+      Jwt__Key: ${JWT_KEY:-dev-only-insecure-key-CHANGE-IN-PRODUCTION-0123456789abcdef}
+
+      # Birinchi ishga tushishda yaratiladigan SuperAdmin. Berilmasa IdentitySeeder
+      # tasodifiy parol generatsiya qiladi va uni logga yozadi (`docker compose logs app`).
+      Seeder__SuperAdminEmail: ${SEEDER_SUPERADMIN_EMAIL:-superadmin@securegate.local}
+      Seeder__SuperAdminPassword: ${SEEDER_SUPERADMIN_PASSWORD:-ChangeMe123!}
+
+      # DB konteyneri "port ochiq" bo'lgandan keyin ham login bir necha soniya tayyor emas.
+      # DataProtection kalit halqasi doimiy volume'da (kamera parollari shifrini saqlash uchun)
+      DataProtection__KeyRingPath: /app/keys
+
+      Startup__MigrationRetryCount: "30"
+      Startup__MigrationRetryDelaySeconds: "5"
+
+      # Kamera/yuz tanish fon xizmati. Lokal demo uchun kamera bo'lmasa false qilib
+      # o'chirib qo'yish mumkin (ilova baribir ko'tariladi).
+      FaceRecognition__EnabledOnStartup: ${FACE_RECOGNITION_ENABLED:-true}
+    ports:
+      - "3333:3333"
+    volumes:
+      # Foydalanuvchi yuklagan rasmlar (PhotoStorageService → wwwroot/uploads)
+      - securegate-uploads:/app/wwwroot/uploads
+      # ASP.NET Core DataProtection kalitlari
+      - securegate-keys:/app/keys
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3333/swagger/v1/swagger.json > /dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+
+volumes:
+  securegate-mssql-data:
+  securegate-uploads:
+  securegate-keys:

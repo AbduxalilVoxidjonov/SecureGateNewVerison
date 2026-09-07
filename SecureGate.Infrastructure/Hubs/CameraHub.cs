@@ -1,39 +1,21 @@
-﻿using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
 
 namespace SecureGate.Infrastructure.Hubs
 {
+    /// <summary>
+    /// Kamera hodisalari uchun SignalR hub.
+    /// Faqat autentifikatsiyadan o'tgan klientlar ulanishi mumkin.
+    ///
+    /// DIQQAT: Bu hubda server → klient eventlari uchun public metod YO'Q.
+    /// "FaceDetected", "CameraStatusChanged", "MotionDetected", "NewSighting",
+    /// "NewAccessLog", "FaceFrameProcessed" eventlari server tomondan
+    /// IHubContext&lt;CameraHub&gt; orqali yuboriladi (CameraStreamWorker,
+    /// FaceMatchHandler, CameraSightingHandler). Klient ularni chaqira olmaydi.
+    /// </summary>
+    [Authorize]
     public class CameraHub : Hub
     {
-        // Kamera holati o'zgarganda
-        public async Task NotifyCameraStatus(int cameraId, string status)
-        {
-            await Clients.All.SendAsync("CameraStatusChanged", cameraId, status);
-        }
-
-        // Yuz aniqlanganda (AI serverdan keladi)
-        public async Task NotifyFaceDetected(int cameraId, string name, double confidence, bool isUnknown)
-        {
-            await Clients.All.SendAsync("FaceDetected", new
-            {
-                cameraId,
-                name,
-                confidence,
-                isUnknown,
-                time = DateTime.UtcNow.ToString("HH:mm:ss")
-            });
-        }
-
-        // Harakat aniqlanganda
-        public async Task NotifyMotionDetected(int cameraId, string location)
-        {
-            await Clients.All.SendAsync("MotionDetected", new
-            {
-                cameraId,
-                location,
-                time = DateTime.UtcNow.ToString("HH:mm:ss")
-            });
-        }
-
         public override async Task OnConnectedAsync()
         {
             await Clients.Caller.SendAsync("Connected", "CameraHub ga ulandi");

@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SecureGate.Data;
 using SecureGate.Domain;
@@ -129,11 +129,25 @@ namespace SecureGate.Infrastructure.Services.Implementations
             var staff = await _db.StaffMembers.FindAsync(id);
             if (staff == null) return;
 
+            // Xodim o'chirilganda uning FaceData yozuvlari ham o'chirilishi shart —
+            // aks holda encoding KnownFaceCache'da qolib, o'chirilgan xodim
+            // turniketdan o'tishda davom etardi (UsersService.DeleteAsync bilan bir xil).
+            var faces = await _db.FaceData.Where(f => f.StaffId == id).ToListAsync();
+            var faceImagePaths = faces.Select(f => f.ImagePath).ToList();
+            _db.FaceData.RemoveRange(faces);
+
             var photoPath = staff.PhotoPath;
             _db.StaffMembers.Remove(staff);
             await _db.SaveChangesAsync();
 
             _photoStorage.DeletePhoto(photoPath);
+
+            // FaceData rasmlari profil rasmidan farq qilsa — ularni ham o'chiramiz.
+            foreach (var img in faceImagePaths)
+            {
+                if (!string.IsNullOrWhiteSpace(img) && !string.Equals(img, photoPath, StringComparison.OrdinalIgnoreCase))
+                    _photoStorage.DeletePhoto(img);
+            }
         }
     }
 }

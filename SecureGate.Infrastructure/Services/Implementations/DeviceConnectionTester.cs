@@ -15,16 +15,21 @@ namespace SecureGate.Infrastructure.Services.Implementations
         private static readonly TimeSpan TcpTimeout = TimeSpan.FromSeconds(4);
         private static readonly TimeSpan StreamTimeout = TimeSpan.FromSeconds(10);
 
+        private readonly IStreamUrlBuilder _urlBuilder;
         private readonly ILogger<DeviceConnectionTester> _logger;
 
-        public DeviceConnectionTester(ILogger<DeviceConnectionTester> logger)
+        public DeviceConnectionTester(IStreamUrlBuilder urlBuilder, ILogger<DeviceConnectionTester> logger)
         {
+            _urlBuilder = urlBuilder;
             _logger = logger;
         }
 
         public async Task<ConnectionTestResult> TestCameraAsync(CameraTestConnectionViewModel model, CancellationToken ct = default)
         {
-            var url = BuildStreamUrl(model);
+            // Test — ko'rsatish bilan bir xil mantiq: MAIN stream afzal.
+            // Parol bu yerda OCHIQ matnda keladi (hali shifrlanmagan), shu sababli
+            // Camera entity'si emas, StreamEndpoint ishlatiladi.
+            var url = _urlBuilder.BuildLive(ToEndpoint(model), StreamPurpose.Main);
             if (string.IsNullOrWhiteSpace(url))
                 return ConnectionTestResult.Fail("Stream URL yoki IP manzil kiriting.");
 
@@ -109,9 +114,9 @@ namespace SecureGate.Infrastructure.Services.Implementations
         // ===== Video oqimni ochib, kadr olishga urinish =====
         private async Task<(bool Ok, int Width, int Height)> TryOpenStreamAsync(string url, CancellationToken ct)
         {
-            // FFMPEG cheksiz kutib qolmasligi uchun TCP transport + socket timeout (5s, mikrosekundda).
-            Environment.SetEnvironmentVariable(
-                "OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stimeout;5000000");
+            // FFMPEG capture sozlamalari (rtsp_transport, stimeout) process-global —
+            // ular OpenCvBootstrap.Configure() orqali Program.cs da bir marta o'rnatiladi.
+            // Bu yerda qayta yozish parallel oqimlar bilan poyga hosil qilardi.
 
             // VideoCapture bloklovchi chaqiruv — Task.Run + umumiy timeout bilan o'raymiz,
             // shunda so'rov hech qachon osilib qolmaydi.
@@ -121,6 +126,10 @@ namespace SecureGate.Infrastructure.Services.Implementations
                 try
                 {
                     cap = new VideoCapture(url);
+
+                    // DIQQAT: CAP_PROP_BUFFERSIZE FFMPEG backend'ida (RTSP/HTTP) UMUMAN QO'LLANMAYDI —
+                    // faqat DSHOW / V4L2 / GStreamer'da ishlaydi. Bu yerda u zararsiz, lekin foydasiz.
+                    // Ulanish testi uchun kechikish muhim emas, shuning uchun boshqa chora kerak emas.
                     cap.Set(VideoCaptureProperties.BufferSize, 1);
                     if (!cap.IsOpened())
                         return (false, 0, 0);
@@ -136,7 +145,7 @@ namespace SecureGate.Infrastructure.Services.Implementations
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Video oqim ochishda xato: {Url}", MaskUrl(url));
+                    _logger.LogWarning(ex, "Video oqim ochishda xato: {Url}", _urlBuilder.Mask(url));
                     return (false, 0, 0);
                 }
                 finally
@@ -150,57 +159,27 @@ namespace SecureGate.Infrastructure.Services.Implementations
             if (finished != task)
             {
                 // Timeout — VideoCapture fon rejimida o'zi yopiladi (FFMPEG stimeout orqali)
-                _logger.LogWarning("Video oqim testi vaqt tugadi: {Url}", MaskUrl(url));
+                _logger.LogWarning("Video oqim testi vaqt tugadi: {Url}", _urlBuilder.Mask(url));
                 return (false, 0, 0);
             }
 
             return await task;
         }
 
-        // ===== Stream URL yasash (CameraStreamWorker bilan bir xil mantiq, plain-text parol bilan) =====
-        // Afzallik: main StreamUrl → AI sub-stream → IP'dan Hikvision sub-stream (channel 102).
-        private static string? BuildStreamUrl(CameraTestConnectionViewModel m)
+        // ===== Forma ma'lumotlarini URL builder tushunadigan ko'rinishga o'tkazish =====
+        // Model/kanal maydonlari test formasida yo'q — shablon kerak bo'lganda
+        // default (Hikvision, kanal 1) ishlatiladi, ya'ni eski xatti-harakat saqlanadi.
+        private static StreamEndpoint ToEndpoint(CameraTestConnectionViewModel m) => new()
         {
-            if (IsStreamScheme(m.StreamUrl))
-                return InjectCredentials(m.StreamUrl!.Trim(), m.Username, m.Password);
-
-            if (IsStreamScheme(m.AiStreamUrl))
-                return InjectCredentials(m.AiStreamUrl!.Trim(), m.Username, m.Password);
-
-            if (!string.IsNullOrWhiteSpace(m.IpAddress))
-            {
-                var creds = !string.IsNullOrEmpty(m.Username)
-                    ? $"{Uri.EscapeDataString(m.Username)}:{Uri.EscapeDataString(m.Password ?? "")}@"
-                    : "";
-                // Channel 102 — sub-stream (Hikvision/Dahua standart konventsiyasi)
-                return $"rtsp://{creds}{m.IpAddress.Trim()}:{m.Port}/Streaming/Channels/102";
-            }
-
-            return null;
-        }
-
-        private static bool IsStreamScheme(string? url) =>
-            !string.IsNullOrWhiteSpace(url) &&
-            (url.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase)
-             || url.StartsWith("rtmp", StringComparison.OrdinalIgnoreCase)
-             || url.StartsWith("http", StringComparison.OrdinalIgnoreCase));
-
-        private static string InjectCredentials(string streamUrl, string? username, string? password)
-        {
-            try
-            {
-                var uri = new Uri(streamUrl);
-                if (!string.IsNullOrEmpty(uri.UserInfo)) return streamUrl; // login allaqachon bor
-                if (string.IsNullOrEmpty(username)) return streamUrl;
-
-                var creds = $"{Uri.EscapeDataString(username)}:{Uri.EscapeDataString(password ?? "")}";
-                return $"{uri.Scheme}://{creds}@{uri.Authority}{uri.PathAndQuery}";
-            }
-            catch
-            {
-                return streamUrl;
-            }
-        }
+            StreamUrl = m.StreamUrl,
+            AiStreamUrl = m.AiStreamUrl,
+            IpAddress = m.IpAddress,
+            Port = m.Port,
+            Username = m.Username,
+            Password = m.Password,
+            CameraModel = CameraModel.Hikvision,
+            ChannelNumber = 1
+        };
 
         private static bool TryParseHostPort(string url, out string host, out int port)
         {
@@ -229,15 +208,5 @@ namespace SecureGate.Infrastructure.Services.Implementations
             _ => 554
         };
 
-        private static string MaskUrl(string url)
-        {
-            try
-            {
-                var uri = new Uri(url);
-                if (string.IsNullOrEmpty(uri.UserInfo)) return url;
-                return $"{uri.Scheme}://***:***@{uri.Authority}{uri.PathAndQuery}";
-            }
-            catch { return url; }
-        }
     }
 }

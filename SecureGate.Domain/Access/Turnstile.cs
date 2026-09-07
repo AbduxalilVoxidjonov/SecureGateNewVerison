@@ -14,9 +14,11 @@ namespace SecureGate.Domain.Access
         public string Name { get; set; } = string.Empty;
 
         [Display(Name = "Joylashuv")]
+        [StringLength(200)]
         public string? Location { get; set; }
 
         [Display(Name = "IP manzil")]
+        [StringLength(45)]
         public string? IpAddress { get; set; }
 
         [Display(Name = "Port")]
@@ -50,6 +52,7 @@ namespace SecureGate.Domain.Access
         public int TodayDenyCount { get; set; }
 
         [Display(Name = "Uptime")]
+        [StringLength(20)]
         public string Uptime { get; set; } = "99.9%";
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

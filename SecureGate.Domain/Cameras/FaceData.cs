@@ -10,6 +10,7 @@ namespace SecureGate.Domain.Cameras
         public int Id { get; set; }
 
         [Display(Name = "Rasm yo'li")]
+        [StringLength(500)]
         public string ImagePath { get; set; } = string.Empty;
 
         [Display(Name = "Encoding")]

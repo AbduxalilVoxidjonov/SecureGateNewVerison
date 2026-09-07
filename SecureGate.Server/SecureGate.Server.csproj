@@ -7,27 +7,65 @@
     <SpaRoot>..\securegate.client</SpaRoot>
     <SpaProxyLaunchCommand>npm run dev</SpaProxyLaunchCommand>
     <SpaProxyServerUrl>https://localhost:51985</SpaProxyServerUrl>
+
+    <!-- Docker build'da SPA (esproj) va SpaProxy chetlab o'tiladi:
+         SPA'ni alohida node stage'i build qiladi va natijasi wwwroot'ga ko'chiriladi. -->
+    <BuildingInDocker Condition="'$(BuildingInDocker)' == ''">false</BuildingInDocker>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.11" />
-    <PackageReference Include="Microsoft.AspNetCore.SpaProxy">
-      <Version>8.*-*</Version>
-    </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.11">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.11" />
-    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260302" />
+    <!-- ONNX Runtime NATIVE kutubxonasi.
+         FaceAiSharp faqat `Microsoft.ML.OnnxRuntime.Managed` ga bog'liq (managed wrapper),
+         native `libonnxruntime.so`/`onnxruntime.dll` ni ilova loyihasi qo'shishi kerak.
+         Bu paket barcha RID'larni (win-x64/arm64, linux-x64/arm64, osx-x64/arm64) o'z ichiga oladi. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.17.3" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
     <PackageReference Include="Swashbuckle.AspNetCore.Annotations" Version="6.6.2" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(BuildingInDocker)' != 'true'">
+    <PackageReference Include="Microsoft.AspNetCore.SpaProxy">
+      <Version>8.*-*</Version>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- ===== OpenCvSharp native runtime (platformaga qarab) =====
+       OpenCvSharp4 faqat managed wrapper; har bir OS/arch uchun mos native
+       `OpenCvSharpExtern` kutubxonasi kerak. Windows paketi Linux konteynerda
+       ishlamaydi, shuning uchun shartli tanlanadi. -->
+  <PropertyGroup>
+    <SecureGateHostArch>$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)</SecureGateHostArch>
+  </PropertyGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260302" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux')) And '$(SecureGateHostArch)' == 'X64'">
+    <PackageReference Include="OpenCvSharp4.official.runtime.linux-x64" Version="4.13.0.20260427" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux')) And '$(SecureGateHostArch)' == 'Arm64'">
+    <PackageReference Include="OpenCvSharp4.runtime.linux-arm64" Version="4.13.0.20260627" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <PackageReference Include="OpenCvSharp4.runtime.osx.10.15-x64" Version="4.6.0.20220608" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\SecureGate.Domain\SecureGate.Domain.csproj" />
     <ProjectReference Include="..\SecureGate.Data\SecureGate.Data.csproj" />
     <ProjectReference Include="..\SecureGate.Infrastructure\SecureGate.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(BuildingInDocker)' != 'true'">
     <ProjectReference Include="..\securegate.client\securegate.client.esproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>

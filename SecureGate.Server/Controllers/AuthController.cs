@@ -1,5 +1,3 @@
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -8,46 +6,75 @@ using SecureGate.Api.Models;
 using SecureGate.Domain.Auth;
 using SecureGate.Infrastructure.Services.Interfaces;
 using Swashbuckle.AspNetCore.Annotations;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace SecureGate.Api.Controllers
 {
     [Route("api/auth")]
-    [AllowAnonymous]
     public class AuthController : ApiControllerBase
     {
+        // User enumeration'ning oldini olish: mavjud bo'lmagan email uchun ham
+        // parol tekshiruvi bilan taxminan bir xil vaqt sarflanadi.
+        private static readonly string DummyPasswordHash =
+            new PasswordHasher<AppUser>().HashPassword(new AppUser(), "SecureGate$Dummy#Password1");
+
         private readonly SignInManager<AppUser> _signInManager;
         private readonly UserManager<AppUser> _userManager;
         private readonly ITokenService _tokenService;
         private readonly IPermissionService _permissionService;
+        private readonly ILogger<AuthController> _logger;
 
         public AuthController(
             SignInManager<AppUser> signInManager,
             UserManager<AppUser> userManager,
             ITokenService tokenService,
-            IPermissionService permissionService)
+            IPermissionService permissionService,
+            ILogger<AuthController> logger)
         {
             _signInManager = signInManager;
             _userManager = userManager;
             _tokenService = tokenService;
             _permissionService = permissionService;
+            _logger = logger;
         }
 
         [HttpPost("login")]
-        [SwaggerOperation(Summary = "Email/parol orqali kirish", Description = "JWT access token qaytaradi. RememberMe=true bo'lsa qo'shimcha cookie ham o'rnatiladi.")]
+        [AllowAnonymous]
+        [SwaggerOperation(Summary = "Email/parol orqali kirish", Description = "JWT access + refresh token qaytaradi. RememberMe=true bo'lsa qo'shimcha cookie ham o'rnatiladi.")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
             if (!ModelState.IsValid) return ValidationFail();
 
-            var user = await _userManager.FindByEmailAsync(request.Email);
-            if (user == null || !user.IsActive)
-                return FailResponse("Email yoki parol noto'g'ri.", StatusCodes.Status401Unauthorized);
+            const string invalidMessage = "Email yoki parol noto'g'ri.";
 
-            var passwordOk = await _userManager.CheckPasswordAsync(user, request.Password);
-            if (!passwordOk)
-                return FailResponse("Email yoki parol noto'g'ri.", StatusCodes.Status401Unauthorized);
+            var user = await _userManager.FindByEmailAsync(request.Email);
+            if (user == null)
+            {
+                // Timing'ni tenglashtirish uchun soxta hash tekshiruvi.
+                _userManager.PasswordHasher.VerifyHashedPassword(new AppUser(), DummyPasswordHash, request.Password);
+                return FailResponse(invalidMessage, StatusCodes.Status401Unauthorized);
+            }
+
+            // lockoutOnFailure: true — cheksiz brute-force'ning oldini oladi
+            // (Identity Lockout sozlamalari Program.cs da: 5 urinish / 15 daqiqa).
+            var signIn = await _signInManager.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: true);
+
+            if (signIn.IsLockedOut)
+            {
+                _logger.LogWarning("Login bloklandi (lockout): {UserId}", user.Id);
+                return FailResponse("Akkaunt vaqtincha bloklandi. Birozdan so'ng qayta urinib ko'ring.",
+                    StatusCodes.Status423Locked);
+            }
+
+            if (!signIn.Succeeded)
+                return FailResponse(invalidMessage, StatusCodes.Status401Unauthorized);
+
+            if (!user.IsActive)
+                return FailResponse(invalidMessage, StatusCodes.Status401Unauthorized);
 
             // JWT
             var token = await _tokenService.CreateAccessTokenAsync(user);
+            var refreshToken = await _tokenService.CreateRefreshTokenAsync(user);
 
             // Cookie (parallel sxema) — agar RememberMe so'ralsa
             if (request.RememberMe)
@@ -66,7 +93,7 @@ namespace SecureGate.Api.Controllers
                 AccessToken = token.AccessToken,
                 TokenType = token.TokenType,
                 ExpiresAt = token.ExpiresAt,
-                RefreshToken = _tokenService.CreateRefreshToken(),
+                RefreshToken = refreshToken,
                 User = new UserInfoDto
                 {
                     Id = user.Id,
@@ -82,9 +109,16 @@ namespace SecureGate.Api.Controllers
 
         [HttpPost("logout")]
         [Authorize(AuthenticationSchemes = AuthSchemes.JwtAndCookie)]
-        [SwaggerOperation(Summary = "Tizimdan chiqish")]
+        [SwaggerOperation(Summary = "Tizimdan chiqish", Description = "SecurityStamp yangilanadi — barcha eski access/refresh tokenlar darhol bekor bo'ladi.")]
         public async Task<IActionResult> Logout()
         {
+            var user = await _userManager.GetUserAsync(User);
+            if (user != null)
+            {
+                // Barcha mavjud JWT (access + refresh) tokenlarni bekor qiladi.
+                await _userManager.UpdateSecurityStampAsync(user);
+            }
+
             await _signInManager.SignOutAsync();
             return OkResponse("Tizimdan chiqildi.");
         }
@@ -117,7 +151,7 @@ namespace SecureGate.Api.Controllers
 
         [HttpPost("change-password")]
         [Authorize(AuthenticationSchemes = AuthSchemes.JwtAndCookie)]
-        [SwaggerOperation(Summary = "Joriy foydalanuvchi parolini o'zgartirish")]
+        [SwaggerOperation(Summary = "Joriy foydalanuvchi parolini o'zgartirish", Description = "Muvaffaqiyatli bo'lsa eski tokenlar bekor bo'ladi — qaytadan login qilish kerak.")]
         public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
         {
             if (!ModelState.IsValid) return ValidationFail();
@@ -134,35 +168,68 @@ namespace SecureGate.Api.Controllers
                 return BadRequest(ApiResponse.Fail("Parolni o'zgartirib bo'lmadi.", errors));
             }
 
-            return OkResponse("Parol o'zgartirildi.");
+            // Parol o'zgargach eski tokenlar ishlamasligi kerak.
+            await _userManager.UpdateSecurityStampAsync(user);
+
+            return OkResponse("Parol o'zgartirildi. Iltimos, qaytadan tizimga kiring.");
         }
 
         [HttpPost("refresh")]
-        [SwaggerOperation(Summary = "Refresh token bilan yangi access token olish", Description = "Hozirda placeholder — refresh token saqlash uchun DB jadval qo'shilishi kerak. Hozircha mavjud foydalanuvchi uchun yangi token yaratadi.")]
+        [AllowAnonymous]
+        [SwaggerOperation(
+            Summary = "Refresh token bilan yangi access token olish",
+            Description = "Foydalanuvchi FAQAT imzolangan refresh token ichidan aniqlanadi. " +
+                          "Har chaqiruvda refresh token ham yangilanadi (rotatsiya).")]
         public async Task<IActionResult> Refresh([FromBody] RefreshTokenRequest request)
         {
-            if (string.IsNullOrWhiteSpace(request.Email))
-                return FailResponse("Email majburiy.");
+            if (!ModelState.IsValid) return ValidationFail();
 
-            var user = await _userManager.FindByEmailAsync(request.Email);
-            if (user == null || !user.IsActive)
-                return FailResponse("Foydalanuvchi topilmadi yoki bloklangan.", StatusCodes.Status401Unauthorized);
+            const string invalidMessage = "Refresh token yaroqsiz yoki muddati o'tgan.";
 
-            var token = await _tokenService.CreateAccessTokenAsync(user);
+            // (a) Imzo / issuer / audience / muddat — to'liq tekshiruv
+            var principal = _tokenService.ValidateRefreshToken(request.RefreshToken);
+            if (principal == null)
+                return FailResponse(invalidMessage, StatusCodes.Status401Unauthorized);
 
-            return OkResponse(new
+            // (b) Token turi aynan "refresh" bo'lishi shart (access token bilan almashtirib bo'lmasin)
+            var tokenType = principal.FindFirst(SecureGateClaims.TokenType)?.Value;
+            if (!string.Equals(tokenType, SecureGateClaims.RefreshTokenType, StringComparison.Ordinal))
+                return FailResponse(invalidMessage, StatusCodes.Status401Unauthorized);
+
+            // (c) Foydalanuvchi faqat token ichidagi sub'dan aniqlanadi
+            var userId = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+            if (string.IsNullOrEmpty(userId))
+                return FailResponse(invalidMessage, StatusCodes.Status401Unauthorized);
+
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user == null)
+                return FailResponse(invalidMessage, StatusCodes.Status401Unauthorized);
+
+            // (d) SecurityStamp — logout / parol o'zgarishi tokenni bekor qiladi
+            var tokenStamp = principal.FindFirst(SecureGateClaims.SecurityStamp)?.Value;
+            var currentStamp = await _userManager.GetSecurityStampAsync(user);
+            if (string.IsNullOrEmpty(tokenStamp) ||
+                !string.Equals(tokenStamp, currentStamp, StringComparison.Ordinal))
             {
-                accessToken = token.AccessToken,
-                tokenType = token.TokenType,
-                expiresAt = token.ExpiresAt,
-                refreshToken = _tokenService.CreateRefreshToken()
+                _logger.LogWarning("Bekor qilingan refresh token ishlatildi: {UserId}", user.Id);
+                return FailResponse(invalidMessage, StatusCodes.Status401Unauthorized);
+            }
+
+            // (e) Bloklangan akkaunt
+            if (!user.IsActive)
+                return FailResponse("Akkaunt bloklangan.", StatusCodes.Status401Unauthorized);
+
+            // (f) Yangi access + yangi refresh (rotatsiya)
+            var token = await _tokenService.CreateAccessTokenAsync(user);
+            var newRefreshToken = await _tokenService.CreateRefreshTokenAsync(user);
+
+            return OkResponse(new RefreshTokenResponse
+            {
+                AccessToken = token.AccessToken,
+                TokenType = token.TokenType,
+                ExpiresAt = token.ExpiresAt,
+                RefreshToken = newRefreshToken
             });
         }
-    }
-
-    public class RefreshTokenRequest
-    {
-        public string Email { get; set; } = string.Empty;
-        public string RefreshToken { get; set; } = string.Empty;
     }
 }

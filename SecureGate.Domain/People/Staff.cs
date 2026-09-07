@@ -26,6 +26,7 @@ namespace SecureGate.Domain.People
         public ShiftType Shift { get; set; } = ShiftType.Day;
 
         [Phone]
+        [StringLength(20)]
         [Display(Name = "Telefon")]
         public string? Phone { get; set; }
 
@@ -36,6 +37,7 @@ namespace SecureGate.Domain.People
         public StaffStatus Status { get; set; } = StaffStatus.Active;
 
         [Display(Name = "Rasm")]
+        [StringLength(500)]
         public string? PhotoPath { get; set; }
 
         public bool FaceRecognitionEnabled { get; set; } = true;

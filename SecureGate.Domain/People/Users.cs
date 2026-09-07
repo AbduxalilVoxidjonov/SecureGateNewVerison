@@ -18,9 +18,11 @@ namespace SecureGate.Domain.People
         [Display(Name = "Familiya")]
         public string LastName { get; set; } = string.Empty;
 
+        // Ixtiyoriy: ID raqam berilmagan bo'lsa NULL bo'ladi. Unique indeks NULL'larni
+        // hisobga olmaydi (filtrlangan indeks), shuning uchun bo'sh qiymatlar to'qnashmaydi.
         [StringLength(20)]
         [Display(Name = "ID raqam")]
-        public string StudentId { get; set; } = string.Empty;
+        public string? StudentId { get; set; }
 
         [Display(Name = "Tug'ilgan sana")]
         [DataType(DataType.Date)]
@@ -30,17 +32,21 @@ namespace SecureGate.Domain.People
         public Gender Gender { get; set; }
 
         [Phone]
+        [StringLength(20)]
         [Display(Name = "Telefon")]
         public string? Phone { get; set; }
 
         [Phone]
+        [StringLength(20)]
         [Display(Name = "Ota-ona telefoni")]
         public string? ParentPhone { get; set; }
 
         [Display(Name = "Manzil")]
+        [StringLength(300)]
         public string? Address { get; set; }
 
         [Display(Name = "Rasm")]
+        [StringLength(500)]
         public string? PhotoPath { get; set; }
 
         [Display(Name = "Holat")]

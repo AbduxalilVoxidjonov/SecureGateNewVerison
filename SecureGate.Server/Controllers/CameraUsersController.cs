@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using SecureGate.Api.Filters;
+using SecureGate.Api.Models;
 using SecureGate.Domain;
 using SecureGate.Domain.Auth;
 using SecureGate.Domain.Cameras;
@@ -32,11 +33,20 @@ namespace SecureGate.Api.Controllers
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 20)
         {
-            var model = await _service.GetListAsync(search, cameraId, userType, dateFrom, dateTo, reviewedOnly, page, pageSize);
+            var (safePage, safeSize) = Paging(page, pageSize);
+            var model = await _service.GetListAsync(search, cameraId, userType, dateFrom, dateTo, reviewedOnly, safePage, safeSize);
+
+            // DTO'ni scrub'dan OLDIN quramiz (HasCredentials to'g'ri hisoblanishi uchun).
+            var cameraDtos = CameraResponseDto.FromMany(model.Cameras);
+
+            // Items[].Camera navigatsiyasi orqali RTSP credential'lari chiqib ketmasin.
+            CameraSecrets.ScrubAll(model.Cameras);
+            CameraSecrets.ScrubAll(model.Items.Select(i => i.Camera));
+
             return OkResponse(new
             {
                 items = model.Items,
-                cameras = model.Cameras,
+                cameras = cameraDtos,
                 page = model.CurrentPage,
                 pageSize = model.PageSize,
                 totalCount = model.TotalCount,
@@ -60,7 +70,8 @@ namespace SecureGate.Api.Controllers
         public async Task<IActionResult> GetById(int id)
         {
             var item = await _service.GetByIdAsync(id);
-            if (item == null) return FailResponse("Yozuv topilmadi.", StatusCodes.Status404NotFound);
+            if (item == null) return NotFoundResponse("Yozuv topilmadi.");
+            CameraSecrets.Scrub(item.Camera);
             return OkResponse(item);
         }
 
@@ -71,8 +82,17 @@ namespace SecureGate.Api.Controllers
         public async Task<IActionResult> Create([FromForm] CameraUserCreateViewModel model)
         {
             if (!ModelState.IsValid) return ValidationFail();
-            var created = await _service.CreateAsync(model);
-            return OkResponse(created, "Yozuv qo'shildi.");
+
+            try
+            {
+                var created = await _service.CreateAsync(model);
+                CameraSecrets.Scrub(created.Camera);
+                return OkResponse(created, "Yozuv qo'shildi.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return FailResponse(ex.Message);
+            }
         }
 
         [HttpPut("{id:int}")]
@@ -83,15 +103,27 @@ namespace SecureGate.Api.Controllers
         {
             if (!ModelState.IsValid) return ValidationFail();
             model.Id = id;
-            var ok = await _service.UpdateAsync(model);
-            if (!ok) return FailResponse("Yozuv topilmadi.", StatusCodes.Status404NotFound);
-            return OkResponse("Yozuv yangilandi.");
+
+            try
+            {
+                var ok = await _service.UpdateAsync(model);
+                if (!ok) return NotFoundResponse("Yozuv topilmadi.");
+                return OkResponse("Yozuv yangilandi.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return FailResponse(ex.Message);
+            }
         }
 
         [HttpDelete("{id:int}")]
         [HasPermission(Permission.CameraUserManage)]
         public async Task<IActionResult> Delete(int id)
         {
+            // Servis Task qaytaradi — yo'q yozuv uchun 200 qaytmasligi kerak.
+            if (await _service.GetByIdAsync(id) is null)
+                return NotFoundResponse("Yozuv topilmadi.");
+
             await _service.DeleteAsync(id);
             return OkResponse("Yozuv o'chirildi.");
         }
@@ -102,7 +134,7 @@ namespace SecureGate.Api.Controllers
         public async Task<IActionResult> MarkReviewed(int id, [FromQuery] bool reviewed = true)
         {
             var ok = await _service.MarkReviewedAsync(id, reviewed);
-            if (!ok) return FailResponse("Yozuv topilmadi.", StatusCodes.Status404NotFound);
+            if (!ok) return NotFoundResponse("Yozuv topilmadi.");
             return OkResponse();
         }
 

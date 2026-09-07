@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using SecureGate.Data;
@@ -96,43 +96,63 @@ namespace SecureGate.Infrastructure.Services.Implementations
             //   1) Tranzaksiyada kamerani CameraCode'siz saqlaymiz (IDENTITY Id'ni olamiz)
             //   2) Id asosida CameraCode hosil qilib, ikkinchi SaveChanges'da yozamiz
             // SQL Server IDENTITY ustuni atomiк — ikkita parallel insert farqli Id oladi.
-            await using var tx = await _db.Database.BeginTransactionAsync();
-            try
+            //
+            // DIQQAT: UseSqlServer(EnableRetryOnFailure) yoqilganda foydalanuvchi boshlagan
+            // tranzaksiya FAQAT execution strategy ichida ochilishi mumkin, aks holda
+            // "SqlServerRetryingExecutionStrategy does not support user-initiated transactions"
+            // xatosi chiqadi. Delegate qayta urinishda TO'LIQ qaytadan ishga tushadi,
+            // shuning uchun ichida idempotent bo'lmagan tashqi ta'sir (fayl/HTTP) yo'q —
+            // faqat DB operatsiyalari va sof `_protector.Protect` chaqiruvi bor.
+            var password = _protector.Protect(model.Password);   // Shifrlash (sof, tranzaksiyadan tashqarida)
+
+            Camera camera = null!;
+
+            var strategy = _db.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
             {
-                var camera = new Camera
+                await using var tx = await _db.Database.BeginTransactionAsync();
+                try
                 {
-                    CameraCode = string.Empty, // vaqtinchalik, pastda to'ldiramiz
-                    Name = model.Name,
-                    Type = model.Type,
-                    Protocol = model.Protocol,
-                    CameraModel = model.CameraModel,
-                    StreamUrl = model.StreamUrl,
-                    AiStreamUrl = model.AiStreamUrl,
-                    IpAddress = model.IpAddress,
-                    Port = model.Port,
-                    Username = model.Username,
-                    Password = _protector.Protect(model.Password),   // Shifrlash
-                    CameraGroupId = model.CameraGroupId,
-                    Quality = model.Quality,
-                    FaceRecognitionEnabled = model.FaceRecognitionEnabled,
-                    ContinuousRecording = model.ContinuousRecording,
-                    MotionDetection = model.MotionDetection
-                };
+                    camera = new Camera
+                    {
+                        CameraCode = string.Empty, // vaqtinchalik, pastda to'ldiramiz
+                        Name = model.Name,
+                        Type = model.Type,
+                        Protocol = model.Protocol,
+                        CameraModel = model.CameraModel,
+                        StreamUrl = model.StreamUrl,
+                        AiStreamUrl = model.AiStreamUrl,
+                        IpAddress = model.IpAddress,
+                        Port = model.Port,
+                        // NVR maydonlari: oddiy kamera bo'lsa kanal raqami majburan tozalanadi,
+                        // aks holda foydalanuvchi qoldirgan qiymat URL shablonini buzardi.
+                        DeviceKind = model.DeviceKind,
+                        ChannelNumber = model.DeviceKind == DeviceKind.NvrChannel ? model.ChannelNumber : null,
+                        Username = model.Username,
+                        Password = password,
+                        CameraGroupId = model.CameraGroupId,
+                        Quality = model.Quality,
+                        FaceRecognitionEnabled = model.FaceRecognitionEnabled,
+                        ContinuousRecording = model.ContinuousRecording,
+                        MotionDetection = model.MotionDetection
+                    };
 
-                _db.Cameras.Add(camera);
-                await _db.SaveChangesAsync(); // Id avtomatik to'ldiriladi
+                    _db.Cameras.Add(camera);
+                    await _db.SaveChangesAsync(); // Id avtomatik to'ldiriladi
 
-                camera.CameraCode = $"CAM-{camera.Id:D2}";
-                await _db.SaveChangesAsync();
+                    camera.CameraCode = $"CAM-{camera.Id:D2}";
+                    await _db.SaveChangesAsync();
 
-                await tx.CommitAsync();
-                return camera;
-            }
-            catch
-            {
-                await tx.RollbackAsync();
-                throw;
-            }
+                    await tx.CommitAsync();
+                }
+                catch
+                {
+                    await tx.RollbackAsync();
+                    throw;
+                }
+            });
+
+            return camera;
         }
 
         public async Task<bool> UpdateAsync(CameraEditViewModel model)
@@ -147,15 +167,33 @@ namespace SecureGate.Infrastructure.Services.Implementations
             camera.Type = model.Type;
             camera.Protocol = model.Protocol;
             camera.CameraModel = model.CameraModel;
-            camera.StreamUrl = model.StreamUrl;
-            camera.AiStreamUrl = model.AiStreamUrl;
             camera.IpAddress = model.IpAddress;
             camera.Port = model.Port;
-            camera.Username = model.Username;
+
+            // ===== NVR maydonlari =====
+            // DeviceKind — enum, "bo'sh" holati yo'q, shu sababli har doim yoziladi.
+            // ChannelNumber esa DeviceKind'ga bog'liq: oddiy kameraga aylantirilganda tozalanadi.
+            camera.DeviceKind = model.DeviceKind;
+            camera.ChannelNumber = model.DeviceKind == DeviceKind.NvrChannel ? model.ChannelNumber : null;
+
+            // ===== Maxfiy / ko'rsatilmaydigan maydonlar: "bo'sh = o'zgarmaydi" =====
+            // CameraResponseDto bu maydonlarni javobda QAYTARMAYDI (RTSP credential'lari
+            // oqib chiqmasligi uchun), shuning uchun frontend Edit formasida ular bo'sh
+            // boshlanadi va faqat to'ldirilganlari payload'ga qo'shiladi.
+            // Shartsiz o'zlashtirsak, oddiy "nomni o'zgartirish" ham StreamUrl/Username'ni
+            // NULL ga yozib, kamera oqimini butunlay o'chirib qo'yardi.
+            if (!string.IsNullOrWhiteSpace(model.StreamUrl))
+                camera.StreamUrl = model.StreamUrl;
+
+            if (!string.IsNullOrWhiteSpace(model.AiStreamUrl))
+                camera.AiStreamUrl = model.AiStreamUrl;
+
+            if (!string.IsNullOrWhiteSpace(model.Username))
+                camera.Username = model.Username;
 
             // Parol faqat foydalanuvchi yangi qiymat kiritgan bo'lsa yangilanadi.
             // Bo'sh qoldirilsa — eski (shifrlangan) parol saqlanadi.
-            if (!string.IsNullOrEmpty(model.Password))
+            if (!string.IsNullOrWhiteSpace(model.Password))
             {
                 camera.Password = _protector.Protect(model.Password);
             }

@@ -1,33 +1,23 @@
-﻿using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
 
 namespace SecureGate.Infrastructure.Hubs
 {
+    /// <summary>
+    /// Ogohlantirishlar hubi. Faqat autentifikatsiyadan o'tgan klientlar uchun.
+    ///
+    /// DIQQAT: Bu hubda server → klient eventlari uchun public metod YO'Q.
+    /// "NewAlert" va "BlockedAccessAttempt" eventlari server tomondan
+    /// IHubContext&lt;AlertHub&gt; orqali yuboriladi (FaceMatchHandler, UsersService).
+    /// Klient ularni chaqira olmaydi — aks holda istalgan ulangan klient
+    /// soxta xavfsizlik ogohlantirishi yubora olardi.
+    ///
+    /// Vaqt qiymatlari ISO-8601 UTC ("O") formatida yuboriladi — formatlash frontend ishi.
+    /// Alert turi: info | warning | danger | success.
+    /// </summary>
+    [Authorize]
     public class AlertHub : Hub
     {
-        // Yangi ogohlantirish
-        public async Task SendAlert(string title, string message, string type)
-        {
-            await Clients.All.SendAsync("NewAlert", new
-            {
-                title,
-                message,
-                type, // info, warning, danger, success
-                time = DateTime.UtcNow.ToString("HH:mm:ss")
-            });
-        }
-
-        // Bloklangan kirish urinishi
-        public async Task NotifyBlockedAccess(string userName, string turnstileName, string reason)
-        {
-            await Clients.All.SendAsync("BlockedAccessAttempt", new
-            {
-                userName,
-                turnstileName,
-                reason,
-                time = DateTime.UtcNow.ToString("HH:mm:ss")
-            });
-        }
-
         public override async Task OnConnectedAsync()
         {
             await Clients.Caller.SendAsync("Connected", "AlertHub ga ulandi");

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using SecureGate.Api.Filters;
+using SecureGate.Api.Models;
 using SecureGate.Domain.Access;
 using SecureGate.Domain.Auth;
 using SecureGate.Infrastructure.Services.Interfaces;
@@ -30,7 +31,13 @@ namespace SecureGate.Api.Controllers
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 15)
         {
-            var model = await _service.GetLogsAsync(search, result, method, turnstileId, dateFrom, dateTo, page, pageSize);
+            var (safePage, safeSize) = Paging(page, pageSize);
+            var model = await _service.GetLogsAsync(search, result, method, turnstileId, dateFrom, dateTo, safePage, safeSize);
+
+            // AccessLog.Camera / Turnstile.LinkedCamera orqali RTSP credential'lari chiqib ketmasin.
+            CameraSecrets.ScrubAll(model.Logs.Select(l => l.Camera));
+            CameraSecrets.ScrubAll(model.Turnstiles.Select(t => t.LinkedCamera));
+
             return OkResponse(new
             {
                 items = model.Logs,
@@ -56,7 +63,11 @@ namespace SecureGate.Api.Controllers
         public async Task<IActionResult> GetById(int id)
         {
             var log = await _service.GetByIdAsync(id);
-            if (log == null) return FailResponse("Yozuv topilmadi.", StatusCodes.Status404NotFound);
+            if (log == null) return NotFoundResponse("Yozuv topilmadi.");
+
+            CameraSecrets.Scrub(log.Camera);
+            CameraSecrets.Scrub(log.Turnstile?.LinkedCamera);
+
             return OkResponse(log);
         }
     }

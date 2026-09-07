@@ -26,12 +26,12 @@ namespace SecureGate.Api.Controllers
         [SwaggerOperation(Summary = "O'quvchilar ro'yxati (filter + pagination)")]
         public async Task<IActionResult> Index(
             [FromQuery] string? search,
-            [FromQuery] int? groupId,
             [FromQuery] StudentStatus? status,
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 10)
         {
-            var model = await _usersService.GetStudentsAsync(search, groupId, status, page, pageSize);
+            var (safePage, safeSize) = Paging(page, pageSize);
+            var model = await _usersService.GetStudentsAsync(search, status, safePage, safeSize);
             return OkResponse(new
             {
                 items = model.Students,
@@ -50,7 +50,7 @@ namespace SecureGate.Api.Controllers
         public async Task<IActionResult> GetById(int id)
         {
             var student = await _usersService.GetByIdAsync(id);
-            if (student == null) return FailResponse("O'quvchi topilmadi.", StatusCodes.Status404NotFound);
+            if (student == null) return NotFoundResponse("O'quvchi topilmadi.");
             return OkResponse(student);
         }
 
@@ -101,6 +101,11 @@ namespace SecureGate.Api.Controllers
         [SwaggerOperation(Summary = "O'quvchini o'chirish")]
         public async Task<IActionResult> Delete(int id)
         {
+            // Servis Task qaytaradi (mavjudlik haqida xabar bermaydi) — shuning uchun
+            // o'chirishdan oldin o'zimiz tekshiramiz, aks holda yo'q yozuv uchun ham 200 qaytardi.
+            if (await _usersService.GetByIdAsync(id) is null)
+                return NotFoundResponse("O'quvchi topilmadi.");
+
             await _usersService.DeleteAsync(id);
             return OkResponse("O'quvchi o'chirildi.");
         }
@@ -111,6 +116,10 @@ namespace SecureGate.Api.Controllers
         public async Task<IActionResult> Block(int id, [FromBody] BlockUserViewModel model)
         {
             if (!ModelState.IsValid) return ValidationFail();
+
+            if (await _usersService.GetByIdAsync(id) is null)
+                return NotFoundResponse("O'quvchi topilmadi.");
+
             model.StudentId = id;
             await _usersService.BlockAsync(id, model);
             return OkResponse("O'quvchi bloklandi.");
@@ -121,6 +130,9 @@ namespace SecureGate.Api.Controllers
         [SwaggerOperation(Summary = "O'quvchini blokdan chiqarish")]
         public async Task<IActionResult> Unblock(int id)
         {
+            if (await _usersService.GetByIdAsync(id) is null)
+                return NotFoundResponse("O'quvchi topilmadi.");
+
             await _usersService.UnblockAsync(id);
             return OkResponse("O'quvchi blokdan chiqarildi.");
         }
@@ -130,6 +142,8 @@ namespace SecureGate.Api.Controllers
         public async Task<IActionResult> AvailableTurnstiles()
         {
             var list = await _turnstileService.GetAllAsync();
+            // Turnstile.LinkedCamera orqali RTSP credential'lari chiqib ketmasin.
+            CameraSecrets.ScrubAll(list.Select(t => t.LinkedCamera));
             return OkResponse(list);
         }
     }

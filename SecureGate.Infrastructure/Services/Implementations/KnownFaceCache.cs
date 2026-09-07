@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SecureGate.Data;
 using SecureGate.Domain;
@@ -23,6 +23,7 @@ namespace SecureGate.Infrastructure.Services.Implementations
         private readonly SemaphoreSlim _reloadGate = new(1, 1);
 
         private volatile IReadOnlyList<KnownFace> _cache = Array.Empty<KnownFace>();
+        private volatile bool _disposed;
 
         public IReadOnlyList<KnownFace> Snapshot => _cache;
         public DateTime LastReloadAt { get; private set; }
@@ -40,12 +41,41 @@ namespace SecureGate.Infrastructure.Services.Implementations
             var reloadSec = config.GetValue<int?>("FaceRecognition:KnownFaceReloadSeconds") ?? 60;
             var period = TimeSpan.FromSeconds(Math.Max(10, reloadSec));
 
-            _timer = new Timer(async _ => await ReloadAsync(), null, TimeSpan.FromSeconds(5), period);
+            // Timer callback — async void semantikasi: hech qanday istisno tashqariga
+            // chiqmasligi kerak, aks holda process yiqiladi.
+            _timer = new Timer(OnTimerTick, null, TimeSpan.FromSeconds(5), period);
         }
 
-        public async Task ReloadAsync(CancellationToken ct = default)
+        private async void OnTimerTick(object? state)
         {
-            if (!await _reloadGate.WaitAsync(0, ct)) return; // boshqasi allaqachon yangilamoqda
+            // To'liq himoyalangan: ReloadAsync ichida ham catch bor, lekin
+            // async void'dan chiqadigan HAR QANDAY istisno process'ni o'ldiradi.
+            try
+            {
+                if (_disposed) return;
+                await ReloadAsync();
+            }
+            catch (Exception ex)
+            {
+                try { _logger.LogError(ex, "KnownFaceCache timer callback'ida kutilmagan xato"); }
+                catch { /* logger ham yiqilsa — jim qolamiz */ }
+            }
+        }
+
+        public async Task ReloadAsync(CancellationToken ct = default, bool force = false)
+        {
+            if (_disposed) return;
+
+            if (force)
+            {
+                // To'liq kutamiz — cache bo'sh qolmasligi kafolatlanadi.
+                await _reloadGate.WaitAsync(ct);
+            }
+            else
+            {
+                // Boshqasi allaqachon yangilamoqda — o'tkazib yuboramiz.
+                if (!await _reloadGate.WaitAsync(0, ct)) return;
+            }
 
             try
             {
@@ -98,7 +128,7 @@ namespace SecureGate.Infrastructure.Services.Implementations
             }
             finally
             {
-                _reloadGate.Release();
+                try { _reloadGate.Release(); } catch (ObjectDisposedException) { }
             }
         }
 
@@ -111,8 +141,23 @@ namespace SecureGate.Infrastructure.Services.Implementations
 
         public void Dispose()
         {
+            if (_disposed) return;
+            _disposed = true;
+
+            // 1) Avval timer'ni to'xtatamiz — yangi reload boshlanmaydi.
             _timer.Dispose();
-            _reloadGate.Dispose();
+
+            // 2) Ketayotgan reload tugashini kutamiz (gate'ni egallash orqali).
+            try
+            {
+                if (_reloadGate.Wait(TimeSpan.FromSeconds(10)))
+                    _reloadGate.Release();
+            }
+            catch (ObjectDisposedException) { }
+
+            // 3) _reloadGate ATAYIN dispose qilinmaydi — kech kelgan ReloadAsync
+            //    chaqiruvi ObjectDisposedException bilan yiqilmasligi uchun.
+            //    (_disposed bayrog'i yangi ishni boshlashiga to'sqinlik qiladi.)
         }
     }
 }

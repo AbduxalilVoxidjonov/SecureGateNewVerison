@@ -1,4 +1,4 @@
-﻿using FaceAiSharp;
+using FaceAiSharp;
 using SecureGate.Infrastructure.Services.Interfaces;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -47,7 +47,7 @@ namespace SecureGate.Infrastructure.Services.Implementations
             try
             {
                 using var image = await Image.LoadAsync<Rgb24>(absolutePath, ct);
-                return ComputeBestEmbedding(image);
+                return await ComputeBestEmbeddingAsync(image, ct);
             }
             catch (Exception ex)
             {
@@ -64,7 +64,11 @@ namespace SecureGate.Infrastructure.Services.Implementations
             try
             {
                 using var image = Image.Load<Rgb24>(imageBytes);
-                return DetectAllInternal(image);
+                return await DetectAllInternalAsync(image, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return Array.Empty<DetectedFace>();
             }
             catch (Exception ex)
             {
@@ -87,9 +91,10 @@ namespace SecureGate.Infrastructure.Services.Implementations
 
         // --- Internal helpers ---
 
-        private float[]? ComputeBestEmbedding(Image<Rgb24> image)
+        // Gate'ni ASINXRON kutamiz — bloklovchi _gate.Wait() thread pool'ni band qilardi.
+        private async Task<float[]?> ComputeBestEmbeddingAsync(Image<Rgb24> image, CancellationToken ct)
         {
-            _gate.Wait();
+            await _gate.WaitAsync(ct);
             try
             {
                 var faces = _detector.DetectFaces(image);
@@ -112,9 +117,12 @@ namespace SecureGate.Infrastructure.Services.Implementations
             }
         }
 
-        private IReadOnlyList<DetectedFace> DetectAllInternal(Image<Rgb24> image)
+        // Gate'ni ASINXRON kutamiz — bloklovchi _gate.Wait() thread pool'ni band qilardi.
+        // ONNX inferens sinxron bajariladi, lekin chaqiruvchi (CameraStreamWorker) alohida
+        // LongRunning thread'da ishlaydi, shuning uchun thread pool starvation bo'lmaydi.
+        private async Task<IReadOnlyList<DetectedFace>> DetectAllInternalAsync(Image<Rgb24> image, CancellationToken ct)
         {
-            _gate.Wait();
+            await _gate.WaitAsync(ct);
             try
             {
                 var faces = _detector.DetectFaces(image);

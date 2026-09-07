@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using SecureGate.Api.Filters;
+using SecureGate.Api.Models;
 using SecureGate.Domain;
 using SecureGate.Domain.Auth;
 using SecureGate.Domain.Cameras;
@@ -37,8 +38,8 @@ namespace SecureGate.Api.Controllers
             var data = await _cameraService.GetCamerasAsync(groupId, status, search);
             return OkResponse(new
             {
-                cameras = data.Cameras,
-                groups = data.CameraGroups,
+                cameras = CameraResponseDto.FromMany(data.Cameras),
+                groups = CameraGroupResponseDto.FromMany(data.CameraGroups),
                 filters = new
                 {
                     groupId = data.SelectedGroupId,
@@ -53,8 +54,8 @@ namespace SecureGate.Api.Controllers
         public async Task<IActionResult> GetById(int id)
         {
             var cam = await _cameraService.GetByIdAsync(id);
-            if (cam == null) return FailResponse("Kamera topilmadi.", StatusCodes.Status404NotFound);
-            return OkResponse(cam);
+            if (cam == null) return NotFoundResponse("Kamera topilmadi.");
+            return OkResponse(CameraResponseDto.From(cam));
         }
 
         [HttpPost]
@@ -67,7 +68,7 @@ namespace SecureGate.Api.Controllers
             try
             {
                 var created = await _cameraService.CreateAsync(model);
-                return OkResponse(created, "Kamera qo'shildi.");
+                return OkResponse(CameraResponseDto.From(created), "Kamera qo'shildi.");
             }
             catch (InvalidOperationException ex)
             {
@@ -79,6 +80,7 @@ namespace SecureGate.Api.Controllers
         [SwaggerOperation(Summary = "Kamera jonli video oqimi (MJPEG)")]
         public async Task Stream(int id, [FromQuery] int? w, CancellationToken ct)
         {
+            // GetByIdAsync admin kamera-guruh filtrini qo'llaydi — begona kamera oqimi ochilmaydi.
             var cam = await _cameraService.GetByIdAsync(id);
             if (cam == null)
             {
@@ -104,8 +106,9 @@ namespace SecureGate.Api.Controllers
         [SwaggerOperation(Summary = "Kamera bitta kadr (JPEG)")]
         public async Task<IActionResult> Snapshot(int id, [FromQuery] int? w, CancellationToken ct)
         {
+            // GetByIdAsync admin kamera-guruh filtrini qo'llaydi.
             var cam = await _cameraService.GetByIdAsync(id);
-            if (cam == null) return NotFound();
+            if (cam == null) return NotFoundResponse("Kamera topilmadi.");
 
             byte[]? jpeg;
             try
@@ -117,7 +120,8 @@ namespace SecureGate.Api.Controllers
                 return new EmptyResult();
             }
 
-            if (jpeg == null) return StatusCode(StatusCodes.Status503ServiceUnavailable);
+            if (jpeg == null)
+                return FailResponse("Kameradan kadr olinmadi.", StatusCodes.Status503ServiceUnavailable);
 
             Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
             return File(jpeg, "image/jpeg");
@@ -140,12 +144,18 @@ namespace SecureGate.Api.Controllers
         public async Task<IActionResult> Update(int id, [FromBody] CameraEditViewModel model)
         {
             if (!ModelState.IsValid) return ValidationFail();
+
+            // IDOR himoyasi: yozishdan OLDIN egalikni tasdiqlaymiz.
+            // GetByIdAsync admin kamera-guruh filtrini qo'llaydi.
+            if (await _cameraService.GetByIdAsync(id) is null)
+                return NotFoundResponse("Kamera topilmadi.");
+
             model.Id = id;
 
             try
             {
                 var ok = await _cameraService.UpdateAsync(model);
-                if (!ok) return FailResponse("Kamera topilmadi.", StatusCodes.Status404NotFound);
+                if (!ok) return NotFoundResponse("Kamera topilmadi.");
                 return OkResponse("Kamera yangilandi.");
             }
             catch (InvalidOperationException ex)
@@ -159,8 +169,12 @@ namespace SecureGate.Api.Controllers
         [SwaggerOperation(Summary = "Kamerani o'chirish")]
         public async Task<IActionResult> Delete(int id)
         {
+            // IDOR himoyasi: o'chirishdan OLDIN egalikni tasdiqlaymiz.
+            if (await _cameraService.GetByIdAsync(id) is null)
+                return NotFoundResponse("Kamera topilmadi.");
+
             var ok = await _cameraService.DeleteAsync(id);
-            if (!ok) return FailResponse("Kamera topilmadi.", StatusCodes.Status404NotFound);
+            if (!ok) return NotFoundResponse("Kamera topilmadi.");
             return OkResponse("Kamera o'chirildi.");
         }
     }

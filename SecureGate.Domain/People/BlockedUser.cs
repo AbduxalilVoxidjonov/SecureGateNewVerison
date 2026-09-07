@@ -11,6 +11,7 @@ namespace SecureGate.Domain.People
 
         [Required]
         [Display(Name = "Sabab")]
+        [StringLength(500)]
         public string Reason { get; set; } = string.Empty;
 
         [Display(Name = "Sabab turi")]
@@ -20,9 +21,11 @@ namespace SecureGate.Domain.People
         public DateTime BlockedAt { get; set; } = DateTime.UtcNow;
 
         [Display(Name = "Bloklagan shaxs")]
+        [StringLength(100)]
         public string? BlockedBy { get; set; }
 
         [Display(Name = "Muddat")]
+        [StringLength(50)]
         public string? Duration { get; set; } // "3 kun", "Muddatsiz", "Karta tiklanguncha"
 
         [Display(Name = "Tugash sanasi")]

@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using SecureGate.Data;
 using SecureGate.Domain;
 using SecureGate.Infrastructure.Services.Interfaces;
@@ -13,6 +13,10 @@ namespace SecureGate.Infrastructure.Services.Implementations
 
         public async Task<AccessLogIndexViewModel> GetLogsAsync(string? search, AccessResult? result, AccessMethod? method, int? turnstileId, DateTime? dateFrom, DateTime? dateTo, int page, int pageSize)
         {
+            // Sahifalash chegaralari — mijoz pageSize=1000000 yuborib DB'ni cho'ktira olmasligi uchun.
+            page = Math.Max(1, page);
+            pageSize = Math.Clamp(pageSize, 1, 200);
+
             var query = _db.AccessLogs
                 .Include(a => a.Student).Include(a => a.Teacher).Include(a => a.Staff)
                 .Include(a => a.Turnstile).Include(a => a.Camera)

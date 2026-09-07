@@ -361,3 +361,10 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+# Claude Code / desktop tomonidan yaratilgan chiqishlar (manba kod emas)
+Claude outputs/
+
+# esproj build chiqindisi. DIQQAT: bu katalog nomida literal `\` bor
+# (Windows yo'li fayl nomiga aylanib qolgan), shuning uchun yuqoridagi
+# `[Oo]bj/` naqshi unga mos KELMAYDI va alohida yozilgan.
+obj\\Debug/

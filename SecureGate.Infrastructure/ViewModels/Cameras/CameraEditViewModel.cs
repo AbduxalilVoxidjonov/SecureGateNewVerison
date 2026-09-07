@@ -1,9 +1,9 @@
-﻿using SecureGate.Domain;
+using SecureGate.Domain;
 using System.ComponentModel.DataAnnotations;
 
 namespace SecureGate.Infrastructure.ViewModels.Cameras
 {
-    public class CameraEditViewModel
+    public class CameraEditViewModel : IValidatableObject
     {
         public int Id { get; set; }
 
@@ -32,6 +32,18 @@ namespace SecureGate.Infrastructure.ViewModels.Cameras
         [RegularExpression(@"^(rtsp|rtmps?|rtmp|https?)://\S+$",
             ErrorMessage = "AI Stream URL rtsp://, rtmp://, http:// yoki https:// dan boshlanishi kerak")]
         public string? AiStreamUrl { get; set; }
+
+        /// <summary>
+        /// Qurilma turi: to'g'ridan-to'g'ri IP-kamera yoki NVR ning bitta kanali.
+        /// NvrChannel bo'lsa IpAddress/Port — NVR manzili, ChannelNumber esa kanal raqami.
+        /// </summary>
+        [Display(Name = "Qurilma turi")]
+        public DeviceKind DeviceKind { get; set; } = DeviceKind.Camera;
+
+        /// <summary>NVR kanal raqami (1 dan boshlab). DeviceKind == NvrChannel bo'lganda majburiy.</summary>
+        [Display(Name = "NVR kanal raqami")]
+        [Range(1, 256, ErrorMessage = "Kanal raqami 1 dan 256 gacha bo'lishi kerak")]
+        public int? ChannelNumber { get; set; }
 
         [Display(Name = "IP manzil")]
         [StringLength(100)]
@@ -69,5 +81,24 @@ namespace SecureGate.Infrastructure.ViewModels.Cameras
 
         public int? CameraGroupId { get; set; }
         public List<CameraGroup> AvailableGroups { get; set; } = new();
+
+        // ===== NVR kanali uchun qo'shimcha qoidalar =====
+        // [ApiController] avtomatik model validatsiyasi IValidatableObject'ni ham chaqiradi,
+        // shu sababli buzilgan holat controller'ga yetib bormaydi (400 qaytadi).
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (DeviceKind == DeviceKind.NvrChannel)
+            {
+                if (!ChannelNumber.HasValue || ChannelNumber.Value < 1)
+                    yield return new ValidationResult(
+                        "NVR kanali uchun kanal raqami majburiy",
+                        new[] { nameof(ChannelNumber) });
+
+                if (string.IsNullOrWhiteSpace(IpAddress))
+                    yield return new ValidationResult(
+                        "NVR kanali uchun NVR IP manzili majburiy",
+                        new[] { nameof(IpAddress) });
+            }
+        }
     }
 }

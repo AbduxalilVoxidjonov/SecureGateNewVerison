@@ -1,71 +1,30 @@
-﻿using Microsoft.AspNetCore.SignalR;
-using SecureGate.Infrastructure.Services;
-using SecureGate.Infrastructure.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
 
 namespace SecureGate.Infrastructure.Hubs
 {
+    /// <summary>
+    /// Turniket hodisalari uchun SignalR hub. Faqat autentifikatsiyadan o'tgan klientlar uchun.
+    ///
+    /// DIQQAT: Bu hubda public metod YO'Q.
+    /// <list type="bullet">
+    /// <item>Turniketni ochish/yopish/bloklash — REST orqali
+    /// (<c>TurnstilesController</c>), chunki u yerda rol/ruxsat tekshiruvi bor.
+    /// Hubdagi eski <c>OpenTurnstile</c>/<c>CloseTurnstile</c>/<c>BlockTurnstile</c>/
+    /// <c>EmergencyOpenAll</c> metodlari o'chirildi — ular istalgan ulangan klientga
+    /// turniketni boshqarish va soxta event yuborish imkonini berardi.</item>
+    /// <item>"TurnstileStatusChanged" (id, status), "TurnstileLog" (id, message, timeUtc)
+    /// va "EmergencyOpen" eventlari server tomondan IHubContext&lt;TurnstileHub&gt;
+    /// orqali yuboriladi (<c>TurnstileService</c>).</item>
+    /// </list>
+    ///
+    /// "TurnstileStatusChanged" IKKI ALOHIDA argument bilan yuboriladi (obyekt emas):
+    /// <c>(int id, string status)</c> — frontend shu shaklni kutadi.
+    /// Vaqt qiymatlari ISO-8601 UTC ("O") formatida — formatlash frontend ishi.
+    /// </summary>
+    [Authorize]
     public class TurnstileHub : Hub
     {
-        private readonly ITurnstileService _turnstileService;
-
-        public TurnstileHub(ITurnstileService turnstileService)
-        {
-            _turnstileService = turnstileService;
-        }
-
-        // Client chaqiradi: turniketni ochish
-        public async Task OpenTurnstile(int turnstileId)
-        {
-            var result = await _turnstileService.OpenAsync(turnstileId);
-            if (result)
-            {
-                await Clients.All.SendAsync("TurnstileStatusChanged", turnstileId, "Online");
-                await Clients.All.SendAsync("TurnstileLog", turnstileId, "Turniket ochildi", DateTime.UtcNow.ToString("HH:mm:ss"));
-            }
-        }
-
-        // Client chaqiradi: turniketni yopish
-        public async Task CloseTurnstile(int turnstileId)
-        {
-            var result = await _turnstileService.CloseAsync(turnstileId);
-            if (result)
-            {
-                await Clients.All.SendAsync("TurnstileStatusChanged", turnstileId, "Offline");
-                await Clients.All.SendAsync("TurnstileLog", turnstileId, "Turniket yopildi", DateTime.UtcNow.ToString("HH:mm:ss"));
-            }
-        }
-
-        // Client chaqiradi: turniketni bloklash
-        public async Task BlockTurnstile(int turnstileId)
-        {
-            var result = await _turnstileService.BlockAsync(turnstileId);
-            if (result)
-            {
-                await Clients.All.SendAsync("TurnstileStatusChanged", turnstileId, "Blocked");
-                await Clients.All.SendAsync("TurnstileLog", turnstileId, "Turniket bloklandi", DateTime.UtcNow.ToString("HH:mm:ss"));
-            }
-        }
-
-        // Favqulodda: hammasini ochish
-        public async Task EmergencyOpenAll()
-        {
-            await _turnstileService.EmergencyOpenAllAsync();
-            await Clients.All.SendAsync("EmergencyOpen");
-        }
-
-        // O'tish hodisasi (server tomondan chaqiriladi — webhook yoki qurilma SDK)
-        public async Task NotifyPassage(int turnstileId, string userName, string method, string result)
-        {
-            await Clients.All.SendAsync("PassageEvent", new
-            {
-                turnstileId,
-                userName,
-                method,
-                result,
-                time = DateTime.UtcNow.ToString("HH:mm:ss")
-            });
-        }
-
         public override async Task OnConnectedAsync()
         {
             await Clients.Caller.SendAsync("Connected", "TurnstileHub ga ulandi");

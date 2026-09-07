@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.AspNetCore.Identity;
 using SecureGate.Domain;
@@ -6,6 +7,7 @@ namespace SecureGate.Domain.Auth
 {
     public class AppUser : IdentityUser
     {
+        [StringLength(100)]
         public string FullName { get; set; } = string.Empty;
         public bool IsActive { get; set; } = true;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

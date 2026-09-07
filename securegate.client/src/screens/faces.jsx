@@ -1,26 +1,43 @@
-// Face detection / Yuz aniqlash — kameralarda aniqlangan odamlar (real API)
+// Face detection / Yuz aniqlash — kameralarda aniqlangan odamlar
+// (real API + SignalR: camera hubi, NewSighting)
 import { useState } from "react";
 import { Icon } from "../components/Icon";
-import { Avatar } from "../components/ui";
+import { Avatar, HubPill, Toast } from "../components/ui";
 import { Loading, ErrorBox, Empty } from "../components/state";
 import { useApi } from "../hooks/useApi";
+import { useHubEvent } from "../hooks/useHub";
+import useMutation from "../hooks/useMutation";
 import { cameraUsersApi } from "../api/endpoints";
+import { fmtDateTime, toNum } from "./utils";
+import { prependCapped, useReloadOnReconnect } from "./live";
 
 const typeLabel = { Unknown: "Noma'lum", Student: "O'quvchi", Teacher: "O'qituvchi", Staff: "Xodim", Guest: "Mehmon" };
+const PAGE_SIZE = 15;
+
+// NewSighting -> jadval satri (REST `cameraUsersApi.list` items bilan bir xil shakl).
+// `confidence` backendda foizda saqlanadi (Confidence = sim * 100).
+const toSightingRow = (p) => ({
+  id: p.id,
+  fullName: p.fullName,
+  userType: p.userType,
+  camera: { id: p.cameraId, name: p.cameraName },
+  detectedAt: p.detectedAt,
+  confidence: p.confidence,
+  isReviewed: false,
+});
 
 const FacesScreen = () => {
   const [cameraId, setCameraId] = useState("");
   const [userType, setUserType] = useState("");
   const [reviewedOnly, setReviewedOnly] = useState(false);
   const [page, setPage] = useState(1);
-  const [busy, setBusy] = useState(false);
 
-  const { data, loading, error, reload } = useApi(
+  const { data, loading, error, reload, setData } = useApi(
     () => cameraUsersApi.list({
       cameraId: cameraId || undefined,
       userType: userType || undefined,
       reviewedOnly: reviewedOnly || undefined,
-      page, pageSize: 15,
+      page, pageSize: PAGE_SIZE,
     }),
     [cameraId, userType, reviewedOnly, page]
   );
@@ -29,10 +46,31 @@ const FacesScreen = () => {
   const cameras = data?.cameras || [];
   const totalPages = data?.totalPages || 1;
 
-  const markReviewed = async (item) => {
-    setBusy(true);
-    try { await cameraUsersApi.markReviewed(item.id, !item.isReviewed); reload(); } finally { setBusy(false); }
-  };
+  const review = useMutation(
+    (id, reviewed) => cameraUsersApi.markReviewed(id, reviewed),
+    { onSuccess: reload }
+  );
+
+  // Uzilish paytida o'tkazib yuborilgan yozuvlarni qoplash uchun —
+  // qayta ulanganda bir marta qayta o'qish.
+  const hubStatus = useReloadOnReconnect("camera", reload);
+
+  // Yangi kuzatuv — jadval boshiga qo'shiladi (sahifa qayta yuklanmaydi).
+  // Faqat 1-sahifada va joriy filtrga mos kelsa: 2-sahifada turgan yozuvlar
+  // siljib ketmasligi, filtr esa buzilmasligi kerak.
+  useHubEvent("camera", "NewSighting", (p) => {
+    if (!p || !data) return;
+    if (page !== 1 || reviewedOnly) return;
+    if (cameraId && String(p.cameraId) !== String(cameraId)) return;
+    if (userType && p.userType !== userType) return;
+    setData((d) => (d ? {
+      ...d,
+      items: prependCapped(d.items || [], toSightingRow(p), (x) => x.id, PAGE_SIZE),
+      totalCount: (d.totalCount ?? 0) + 1,
+      todayCount: (d.todayCount ?? 0) + 1,
+      unknownCount: (d.unknownCount ?? 0) + (p.isUnknown ? 1 : 0),
+    } : d));
+  });
 
   return (
     <div className="screen-in">
@@ -41,8 +79,17 @@ const FacesScreen = () => {
           <h1 className="page-title">Yuz aniqlash</h1>
           <div className="page-sub">Kameralarda aniqlangan odamlar</div>
         </div>
-        <button className="btn" onClick={reload}><Icon name="refresh" size={14} /> Yangilash</button>
+        <div className="row">
+          <HubPill status={hubStatus} title="camera hub" />
+          <button className="btn" onClick={reload}><Icon name="refresh" size={14} /> Yangilash</button>
+        </div>
       </div>
+
+      {review.error && (
+        <div style={{ marginBottom: 12 }}>
+          <ErrorBox error={review.error} onRetry={review.reset} />
+        </div>
+      )}
 
       <div className="stat-grid">
         <div className="stat"><div className="label"><Icon name="face" size={14} /> Jami aniqlangan</div><div className="v tnum">{data?.totalCount ?? 0}</div></div>
@@ -82,13 +129,13 @@ const FacesScreen = () => {
                   </td>
                   <td><span className={`pill ${x.userType === "Unknown" ? "warn" : "off"}`}>{typeLabel[x.userType] || x.userType}</span></td>
                   <td className="mono faint">{x.camera?.name || x.camera?.cameraCode || "—"}</td>
-                  <td className="mono faint" style={{ fontSize: 11.5 }}>{new Date(x.detectedAt).toLocaleString("uz-UZ")}</td>
+                  <td className="mono faint" style={{ fontSize: 11.5 }}>{fmtDateTime(x.detectedAt)}</td>
                   <td className="mono tnum" style={{ color: x.confidence == null ? "var(--text-3)" : x.confidence < 50 ? "var(--warn)" : "var(--accent)" }}>
-                    {x.confidence != null ? `${x.confidence.toFixed(1)}%` : "—"}
+                    {x.confidence != null ? `${toNum(x.confidence).toFixed(1)}%` : "—"}
                   </td>
                   <td>{x.isReviewed ? <span className="pill on">Ko'rilgan</span> : <span className="pill off">Yangi</span>}</td>
                   <td>
-                    <button className="btn xs ghost" disabled={busy} title="Ko'rilgan deb belgilash" onClick={() => markReviewed(x)}>
+                    <button className="btn xs ghost" disabled={review.busy} title="Ko'rilgan deb belgilash" onClick={() => review.run(x.id, !x.isReviewed)}>
                       <Icon name={x.isReviewed ? "x" : "check"} size={12} />
                     </button>
                   </td>
@@ -107,6 +154,8 @@ const FacesScreen = () => {
           </div>
         )}
       </div>
+
+      <Toast message={review.error?.message} kind="error" onClose={review.reset} />
     </div>
   );
 };

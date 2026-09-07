@@ -7,6 +7,11 @@ namespace SecureGate.Domain.Common
     {
         public static string GetDisplayName(this Enum enumValue)
         {
+            // Bazadan kelgan noma'lum (enum'da mavjud bo'lmagan) qiymat raqam ko'rinishida
+            // chiqib ketmasligi uchun.
+            if (!Enum.IsDefined(enumValue.GetType(), enumValue))
+                return "Noma'lum";
+
             var displayAttribute = enumValue.GetType()
                 .GetMember(enumValue.ToString())
                 .FirstOrDefault()?

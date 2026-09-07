@@ -1,7 +1,5 @@
-# This workflow will build a .NET project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-net
-
-name: .NET
+# SecureGate — backend (.NET 8) va frontend (React/Vite) uchun CI.
+name: CI
 
 on:
   push:
@@ -10,19 +8,65 @@ on:
     branches: [ "master" ]
 
 jobs:
-  build:
-
+  backend:
+    name: Backend (.NET 8)
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: 8.0.x
-    - name: Restore dependencies
-      run: dotnet restore
-    - name: Build
-      run: dotnet build --no-restore
-    - name: Test
-      run: dotnet test --no-build --verbosity normal
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # .slnx ichida securegate.client.esproj (JS loyihasi) ham bor — uni
+      # `dotnet` qurmasligi uchun backend loyihalarini aniq ko'rsatamiz.
+      - name: Restore
+        run: dotnet restore SecureGate.Server/SecureGate.Server.csproj
+
+      - name: Build
+        run: dotnet build SecureGate.Server/SecureGate.Server.csproj --no-restore -c Release
+
+      # Loyihada hali test proyekti yo'q. Qo'shilganda quyidagi qadam avtomatik ishlaydi;
+      # topilmasa jimgina o'tkazib yuboriladi (`dotnet test` bo'sh solution'da xato beradi).
+      - name: Test
+        run: |
+          mapfile -t TESTS < <(find . -name '*Tests.csproj' -o -name '*.Test.csproj' -o -name '*.Tests.csproj')
+          if [ ${#TESTS[@]} -eq 0 ]; then
+            echo "Test proyekti topilmadi — o'tkazib yuborildi."
+            exit 0
+          fi
+          for t in "${TESTS[@]}"; do dotnet test "$t" --verbosity normal; done
+
+  frontend:
+    name: Frontend (React + Vite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: securegate.client
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: securegate.client/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npx eslint . --no-inline-config
+
+      - name: Build
+        run: npm run build
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t securegate-app:ci .

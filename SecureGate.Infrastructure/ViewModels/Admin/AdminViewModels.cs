@@ -1,4 +1,4 @@
-﻿using SecureGate.Domain;
+using SecureGate.Domain;
 using SecureGate.Domain.Auth;
 using System.ComponentModel.DataAnnotations;
 
@@ -98,7 +98,11 @@ namespace SecureGate.Infrastructure.ViewModels.Admin
         {
             ["Foydalanuvchilar"] = new[] { Permission.UsersView, Permission.UsersManage, Permission.UsersDelete },
             ["Xodimlar"] = new[] { Permission.StaffView, Permission.StaffManage },
-            ["Kameralar"] = new[] { Permission.CameraView, Permission.CameraManage },
+            ["Kameralar"] = new[]
+            {
+                Permission.CameraView, Permission.CameraManage,
+                Permission.CameraUserView, Permission.CameraUserManage
+            },
             ["Turniketlar"] = new[] { Permission.TurnstileView, Permission.TurnstileManage },
             ["Kuzatuv va hisobot"] = new[] { Permission.AccessLogsView, Permission.RecordingsView, Permission.ReportsView },
             ["Yuzni tanish & Blok"] = new[] { Permission.FaceRecognitionManage, Permission.BlockedManage },
@@ -114,6 +118,8 @@ namespace SecureGate.Infrastructure.ViewModels.Admin
             Permission.StaffManage => "Xodimlarni boshqarish",
             Permission.CameraView => "Kameralarni ko'rish",
             Permission.CameraManage => "Kameralarni boshqarish",
+            Permission.CameraUserView => "Kameradagi odamlarni ko'rish",
+            Permission.CameraUserManage => "Kameradagi odamlarni boshqarish",
             Permission.TurnstileView => "Turniketlarni ko'rish",
             Permission.TurnstileManage => "Turniketlarni boshqarish",
             Permission.AccessLogsView => "Kirish jurnali",
